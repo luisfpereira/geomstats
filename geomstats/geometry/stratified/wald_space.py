@@ -291,8 +291,8 @@ class WaldSpace(PointSet):
         WaldSpace is embedded into.
     """
 
-    def __init__(self, n_labels, ambient_space=None):
-        super().__init__()
+    def __init__(self, n_labels):
+        super().__init__(equip=False)
         self.n_labels = n_labels
 
         if ambient_space is None:

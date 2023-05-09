@@ -58,7 +58,6 @@ from autograd.numpy import (
     shape,
     sort,
     split,
-    squeeze,
     stack,
     std,
     sum,
@@ -76,7 +75,7 @@ from autograd.numpy import (
     where,
     zeros_like,
 )
-from autograd.scipy.special import erf, polygamma  # NOQA
+from autograd.scipy.special import erf, gamma, polygamma  # NOQA
 from scipy.sparse import coo_matrix as _coo_matrix
 
 from .._backend_config import np_atol as atol
@@ -91,7 +90,11 @@ from ._dtype import (
     _cast_out_from_dtype,
     _dyn_update_dtype,
     as_dtype,
+    get_default_cdtype,
     get_default_dtype,
+    is_bool,
+    is_complex,
+    is_floating,
     set_default_dtype,
 )
 
@@ -134,6 +137,14 @@ tanh = _box_unary_scalar(target=_np.tanh)
 arctan2 = _box_binary_scalar(target=_np.arctan2)
 mod = _box_binary_scalar(target=_np.mod)
 power = _box_binary_scalar(target=_np.power)
+
+
+def squeeze(x, axis=None):
+    if axis is None:
+        return _np.squeeze(x)
+    if x.shape[axis] != 1:
+        return x
+    return _np.squeeze(x, axis=axis)
 
 
 def angle(z, deg=False):
@@ -387,7 +398,7 @@ def ndim(x):
 
 
 def copy(x):
-    return x.copy()
+    return _np.array(x, copy=True)
 
 
 def array_from_sparse(indices, data, target_shape):
@@ -422,14 +433,12 @@ def vec_to_diag(vec):
 
 
 def tril_to_vec(x, k=0):
-    """ """
     n = x.shape[-1]
     rows, cols = tril_indices(n, k=k)
     return x[..., rows, cols]
 
 
 def triu_to_vec(x, k=0):
-    """ """
     n = x.shape[-1]
     rows, cols = triu_indices(n, k=k)
     return x[..., rows, cols]
@@ -505,10 +514,9 @@ def outer(a, b):
 def matvec(A, b):
     if b.ndim == 1:
         return _np.matmul(A, b)
-    else:
-        if A.ndim == 2:
-            return _np.matmul(A, b.T).T
-        return _np.einsum("...ij,...j->...i", A, b)
+    if A.ndim == 2:
+        return _np.matmul(A, b.T).T
+    return _np.einsum("...ij,...j->...i", A, b)
 
 
 def dot(a, b):
@@ -523,3 +531,34 @@ def dot(a, b):
 
 def trace(a):
     return _np.trace(a, axis1=-2, axis2=-1)
+
+
+def scatter_add(input, dim, index, src):
+    """Add values from src into input at the indices specified in index.
+
+    Parameters
+    ----------
+    input : array-like
+        Tensor to scatter values into.
+    dim : int
+        The axis along which to index.
+    index : array-like
+        The indices of elements to scatter.
+    src : array-like
+        The source element(s) to scatter.
+
+    Returns
+    -------
+    input : array-like
+        Modified input array.
+    """
+    if dim == 0:
+        for i, val in zip(index, src):
+            input[i] += val
+        return input
+    if dim == 1:
+        for j in range(len(input)):
+            for i, val in zip(index[j], src[j]):
+                input[j, i] += val
+        return input
+    raise NotImplementedError

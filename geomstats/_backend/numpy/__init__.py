@@ -58,7 +58,6 @@ from numpy import (
     shape,
     sort,
     split,
-    squeeze,
     stack,
     std,
     sum,
@@ -77,7 +76,7 @@ from numpy import (
     zeros_like,
 )
 from scipy.sparse import coo_matrix as _coo_matrix  # NOQA
-from scipy.special import erf, polygamma  # NOQA
+from scipy.special import erf, gamma, polygamma  # NOQA
 
 from . import autodiff  # NOQA
 from . import linalg  # NOQA
@@ -90,7 +89,11 @@ from ._dtype import (
     _dyn_update_dtype,
     _modify_func_default_dtype,
     as_dtype,
+    get_default_cdtype,
     get_default_dtype,
+    is_bool,
+    is_complex,
+    is_floating,
     set_default_dtype,
 )
 
@@ -177,6 +180,14 @@ def to_numpy(x):
 
 def from_numpy(x):
     return x
+
+
+def squeeze(x, axis=None):
+    if axis is None:
+        return _np.squeeze(x)
+    if x.shape[axis] != 1:
+        return x
+    return _np.squeeze(x, axis=axis)
 
 
 def _get_wider_dtype(tensor_list):
@@ -501,10 +512,9 @@ def outer(a, b):
 def matvec(A, b):
     if b.ndim == 1:
         return _np.matmul(A, b)
-    else:
-        if A.ndim == 2:
-            return _np.matmul(A, b.T).T
-        return _np.einsum("...ij,...j->...i", A, b)
+    if A.ndim == 2:
+        return _np.matmul(A, b.T).T
+    return _np.einsum("...ij,...j->...i", A, b)
 
 
 def dot(a, b):
@@ -519,3 +529,34 @@ def dot(a, b):
 
 def trace(a):
     return _np.trace(a, axis1=-2, axis2=-1)
+
+
+def scatter_add(input, dim, index, src):
+    """Add values from src into input at the indices specified in index.
+
+    Parameters
+    ----------
+    input : array-like
+        Tensor to scatter values into.
+    dim : int
+        The axis along which to index.
+    index : array-like
+        The indices of elements to scatter.
+    src : array-like
+        The source element(s) to scatter.
+
+    Returns
+    -------
+    input : array-like
+        Modified input array.
+    """
+    if dim == 0:
+        for i, val in zip(index, src):
+            input[i] += val
+        return input
+    if dim == 1:
+        for j in range(len(input)):
+            for i, val in zip(index[j], src[j]):
+                input[j, i] += val
+        return input
+    raise NotImplementedError
