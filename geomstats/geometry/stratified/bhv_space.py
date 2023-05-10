@@ -34,7 +34,7 @@ References
         volume 8, issue 1, pages 2-13, 2011.
         https://doi.org/10.1109/TCBB.2010.3
 """
-import itertools as it
+import itertools
 
 import networkx as nx
 
@@ -55,7 +55,10 @@ from geomstats.geometry.stratified.trees import (
     delete_splits,
     generate_splits,
 )
-from geomstats.geometry.stratified.wald_space import Wald
+
+# TODO: update vectorize to retrieve proper shape
+
+# TODO: n_labels to n_leaves?
 
 
 def generate_random_tree(n_labels, p_keep=0.9, btol=1e-8):
@@ -81,7 +84,25 @@ def generate_random_tree(n_labels, p_keep=0.9, btol=1e-8):
     x = gs.minimum(gs.maximum(btol, x), 1 - btol)
     lengths = gs.maximum(btol, gs.abs(gs.log(1 - x)))
 
-    return Tree(n_labels, splits, lengths)
+    return Tree(Topology(splits), lengths)
+
+
+def get_pendant_edges(n_labels):
+    """Return pendant edges.
+
+    Parameters
+    ----------
+    n_labels : int
+
+    Returns
+    -------
+    pendant_edges : set[Split]
+        Edges containing the leaves.
+    """
+    return {
+        Split(part1=[i], part2=[j for j in range(n_labels) if j != i])
+        for i in range(n_labels)
+    }
 
 
 class Topology(BaseTopology):
@@ -95,15 +116,18 @@ class Topology(BaseTopology):
         The structure of the tree in form of a set of splits of the set of labels.
     """
 
-    def __init__(self, n_labels, splits):
-        super().__init__(
-            n_labels=n_labels,
-            partition=(tuple(i for i in range(n_labels)),),
-            split_sets=(splits,),
-        )
+    def __init__(self, splits):
+        # TODO: add verification?
+        super().__init__()
+        self.splits = splits
+        self.splits_set = set(splits)
+
+    @property
+    def n_labels(self):
+        return len(self.splits[0].part1 | self.splits[0].part2)
 
 
-class Tree(Wald, Point):
+class Tree(Point):
     r"""A class for trees, that are phylogenetic trees, elements of the BHV space.
 
     Parameters
@@ -116,40 +140,21 @@ class Tree(Wald, Point):
         The edge lengths of the splits, a vector containing positive numbers.
     """
 
-    def __init__(self, n_labels, splits, lengths):
-        # TODO: need to inherit from Wald? Can we simplify?
-        top = Topology(
-            n_labels=n_labels,
-            splits=splits,
-        )
-        self.lengths = gs.array(
-            [
-                length
-                for _, length in sorted(
-                    zip(splits, lengths), key=lambda x: top.where.get(x[0])
-                )
-            ]
-        )
+    def __init__(self, topology, lengths):
+        # TODO: rename lengths to weights
+        self._check_init(topology, lengths)
+        super().__init__()
 
-        super().__init__(topology=top, weights=1 - gs.exp(-self.lengths))
+        self.topology = topology
+        self.lengths = lengths
 
-    @property
-    def splits(self):
-        return self.topology.split_sets[0]
+        self.dict_repr = dict(zip(self.topology.splits, self.lengths))
 
-    @property
-    def labels(self):
-        return self.topology.partition[0]
-
-    def to_array(self):
-        """Turn the tree into a numpy array, namely its distance matrix.
-
-        Returns
-        -------
-        array_of_tree : array-like, shape=[n_labels, n_labels]
-            The distance matrix corresponding to the wald.
-        """
-        return gs.abs(gs.log(self.corr))
+    def _check_init(self, topology, lengths):
+        if len(topology.splits) != len(lengths):
+            raise ValueError(
+                "Number of splits does not correspond to number of lengths."
+            )
 
     def __repr__(self):
         """Return the string representation of the tree.
@@ -162,7 +167,19 @@ class Tree(Wald, Point):
         string_of_tree : str
             Return the string representation of the tree.
         """
-        return repr((self.splits, tuple(self.lengths)))
+        return repr(self.dict_repr)
+
+    def __hash__(self):
+        """Compute the hash of the wald.
+
+        Note that this hash simply uses the hash function for tuples.
+
+        Returns
+        -------
+        hash_of_wald : int
+            Return the hash of the wald.
+        """
+        return hash((self.topology, tuple(self.lengths)))
 
     def __str__(self):
         """Return the fancy printable string representation of the tree.
@@ -178,6 +195,13 @@ class Tree(Wald, Point):
         """
         return f"({self.topology};{str(self.lengths)})"
 
+    @property
+    def n_labels(self):
+        return self.topology.n_labels
+
+    def edge_length(self, split):
+        return self.dict_repr[split]
+
 
 class TreeSpace(PointSet):
     """Class for the Tree space, a point set containing phylogenetic trees.
@@ -190,25 +214,14 @@ class TreeSpace(PointSet):
         A list of splits of the set of labels.
     """
 
-    def __init__(self, n_labels):
-        super().__init__()
+    def __init__(self, n_labels, equip=True):
         self.n_labels = n_labels
+        super().__init__(equip=equip)
 
-    @_vectorize_point((1, "points"))
-    def set_to_array(self, points):
-        """Convert a set of points into an array.
-
-        Parameters
-        ----------
-        points : list of Tree, shape=[...]
-            Number of samples of trees to turn into an array.
-
-        Returns
-        -------
-        points_array : array-like, shape=[...]
-            Array of the trees that are turned into arrays.
-        """
-        return gs.array([tree.to_array() for tree in points])
+    @staticmethod
+    def default_metric():
+        """Metric to equip the space with if equip is True."""
+        return BHVMetric
 
     @_vectorize_point((1, "point"))
     def belongs(self, point, atol=gs.atol):
@@ -269,19 +282,17 @@ class BHVMetric(PointSetMetric):
     ----------
     n_labels : int
         The number of labels.
-    tol : float
-        Tolerance for the algorithm, in particular for the decision problem in the
-        GTP algorithm in [OP11]_ to avoid unambiguity.
     """
 
-    def __init__(self, space, tol=1e-8):
-        # TODO: we don't really need to add space here
+    def __init__(self, space):
         super().__init__(space=space)
-        self.geodesic_solver = GTPSolver(n_labels=space.n_labels, tol=tol)
+        # TODO: need to define n_labels
+        self.geodesic_solver = GeodesicTreePathSolver(n_labels=space.n_labels)
 
     @property
     def n_labels(self):
-        return self.space.n_labels
+        # TODO: remove?
+        return self._space.n_labels
 
     def squared_dist(self, point_a, point_b):
         """Compute the squared distance between two points.
@@ -336,7 +347,7 @@ class BHVMetric(PointSetMetric):
         return self.geodesic_solver.geodesic(point_a=point_a, point_b=point_b)
 
 
-class GTPSolver:
+class GeodesicTreePathSolver:
     """'Geodesic Tree Path' problem solver [OP11]_.
 
     Essentially uses Theorem 2.4 from [OP11]_.
@@ -348,26 +359,30 @@ class GTPSolver:
         GTP algorithm in [OP11] to avoid unambiguity.
     """
 
+    # TODO: bring in notion of path (as sequence of orthants)?
+
     def __init__(self, n_labels, tol=1e-8):
+        # TODO: do we really need n_labels or receive space??
         self.n_labels = n_labels
         self.tol = tol
 
-    def _point_squared_dist(self, point_a, point_b):
-        sp_a = {split: length for split, length in zip(point_a.splits, point_a.lengths)}
-        sp_b = {split: length for split, length in zip(point_b.splits, point_b.lengths)}
-        common_a, common_b, supports = self._trees_with_common_support(
-            sp_a,
-            sp_b,
+    def _squared_dist_single(self, point_a, point_b):
+        common_splits_with_length, supports = self._trees_with_common_support(
+            point_a,
+            point_b,
         )
-        sq_dist_common = sum((common_a[s] - common_b[s]) ** 2 for s in common_a.keys())
+        sq_dist_common = sum(
+            (length[0] - length[1]) ** 2
+            for length in common_splits_with_length.values()
+        )
         sq_dist_parts = sum(
             (
-                gs.sqrt(sum(sp_a[s] ** 2 for s in a))
-                + gs.sqrt(sum(sp_b[s] ** 2 for s in b))
+                gs.sqrt(sum(point_a.edge_length(split) ** 2 for split in splits_a))
+                + gs.sqrt(sum(point_b.edge_length(split) ** 2 for split in splits_b))
             )
             ** 2
-            for supp_a, supp_b in supports.values()
-            for a, b in zip(supp_a, supp_b)
+            for support_a, support_b in supports.values()
+            for splits_a, splits_b in zip(support_a, support_b)
         )
 
         return sq_dist_common + sq_dist_parts
@@ -388,11 +403,12 @@ class GTPSolver:
         squared_dist : float or gs.array
             The squared distance between the two points.
         """
+        # TODO: make this come from decorator
         point_a, point_b = broadcast_lists(point_a, point_b)
 
         sq_dists = gs.array(
             [
-                self._point_squared_dist(point_a_, point_b_)
+                self._squared_dist_single(point_a_, point_b_)
                 for point_a_, point_b_ in zip(point_a, point_b)
             ]
         )
@@ -419,7 +435,7 @@ class GTPSolver:
         """
         return gs.sqrt(self.squared_dist(point_a, point_b))
 
-    def _point_geodesic(self, point_a, point_b):
+    def _geodesic_single(self, point_a, point_b):
         """Compute the geodesic between two points.
 
         Parameters
@@ -435,18 +451,31 @@ class GTPSolver:
             The geodesic between the two points. Takes parameter t, that is the time
             between 0 and 1 at which the corresponding point on the path is returned.
         """
-        sp_a = dict(zip(point_a.splits, point_a.lengths))
-        sp_b = dict(zip(point_b.splits, point_b.lengths))
+        # TODO: delete
+        sp_a = dict(zip(point_a.topology.splits, point_a.lengths))
+        sp_b = dict(zip(point_b.topology.splits, point_b.lengths))
         common_a, common_b, supports = self._trees_with_common_support(
             sp_a,
             sp_b,
         )
+
+        common_splits_with_length, supports = self._trees_with_common_support(
+            point_a,
+            point_b,
+        )
+
+        # TODO: return topology of crossed orthant?
+
+        # TODO: remove partitions
         ratios = {
-            part: [
-                gs.sqrt(sum(sp_a[s] ** 2 for s in a) / sum(sp_b[s] ** 2 for s in b))
-                for a, b in zip(supp_a, supp_b)
+            partition: [
+                gs.sqrt(
+                    sum(point_a.edge_length(split) ** 2 for split in splits_a)
+                    / sum(point_b.edge_length(split) ** 2 for split in splits_b)
+                )
+                for splits_a, splits_b in zip(support_a, support_b)
             ]
-            for part, (supp_a, supp_b) in supports.items()
+            for partition, (support_a, support_b) in supports.items()
         }
 
         def geodesic_t(t):
@@ -519,73 +548,89 @@ class GTPSolver:
         point_a, point_b = broadcast_lists(point_a, point_b)
 
         fncs = [
-            self._point_geodesic(point_a_, point_b_)
+            self._geodesic_single(point_a_, point_b_)
             for point_a_, point_b_ in zip(point_a, point_b)
         ]
 
         return lambda t: _vec(t, fncs=fncs)
 
-    def _trees_with_common_support(self, splits_a, splits_b):
+    def _trees_with_common_support(self, point_a, point_b):
         """Compute the support that corresponds to a geodesic for common split sets.
 
-        We refer to the splits of the tree corresponding to splits_a as A,
-        and B analogously.
+        We refer to the splits of each tree A and B, respectively.
         This method divides the split sets into smaller split sets that have distinct
         support and then use the method ``gtp_trees_with_distinct_support``.
         For each of these smaller subsets, return the support in a dictionary.
 
-        The common splits are returned separately as well as the respective edge
+        The common splits are returned together and with the respective edge
         lengths. A split in A that is not in B but compatible with all
         splits of B is added to the common splits of B with length zero,
         and vice versa for splits in B.
 
         Parameters
         ----------
-        splits_a : dict of Split, float
-            The splits in A and their respective lengths.
-        splits_b : dict of Split, float
-            The splits in B and their respective lengths.
+        point_a : Tree
+            A point in BHV Space.
+        point_b : Tree
+            A point in BHV Space.
 
         Returns
         -------
-        common_a : dict
-            Containing the splits of A that are also in B, as well as the splits of B
-            that are compatible with all splits in A, given edge length zero.
-        common_b : dict
-            Containing the splits of B that are also in A, as well as the splits of A
-            that are compatible with all splits in B, given edge length zero.
+        common_splits_with_length : dict[tuple[2, float]]
+            Contains the splits of A that are also in B, the splits of B
+            that are compatible with all splits in A, given edge length zero,
+            and the splits of A that are compatible with all splits in B,
+            given edge length zero.
         supports: dict
-            Containing for each subtree the respective support.
+            Contains the respective support for each subtree.
         """
-        pendants = {
-            Split(part1=[i], part2=[j for j in range(self.n_labels) if j != i])
-            for i in range(self.n_labels)
+        # TODO: any way of accelerating when common splits is empty?
+        pendants = get_pendant_edges(self.n_labels)
+
+        common_splits = point_a.topology.splits_set & point_b.topology.splits_set
+        splits_only_a = point_a.topology.splits_set - common_splits
+        splits_only_b = point_b.topology.splits_set - common_splits
+
+        easy_a = {
+            split
+            for split in splits_only_a
+            if split.is_compatible_with_set(splits_only_b)
         }
-        sp_a, sp_b = set(splits_a.keys()), set(splits_b.keys())
-        common = sp_a & sp_b
-        only_a = sp_a - common
-        only_b = sp_b - common
-        easy_a = {s for s in only_a if gs.all(list(map(s.is_compatible, only_b)))}
-        easy_b = {s for s in only_b if gs.all(list(map(s.is_compatible, only_a)))}
-        total_a = (sp_a | easy_b) - pendants
-        total_b = (sp_b | easy_a) - pendants
+        easy_b = {
+            split
+            for split in splits_only_b
+            if split.is_compatible_with_set(splits_only_a)
+        }
 
-        cut_splits = (common | easy_a | easy_b) - pendants
+        total_a = (point_a.topology.splits_set | easy_b) - pendants
+        total_b = (point_b.topology.splits_set | easy_a) - pendants
 
-        trees_a = self._cut_tree_at_splits(total_a, cut_splits)
-        trees_b = self._cut_tree_at_splits(total_b, cut_splits)
+        # TODO: review this part
+        cut_splits = (common_splits | easy_a | easy_b) - pendants
+
+        # TODO: the concept of partition probably does not apply here
+        partitions_a = self._cut_tree_at_splits(total_a, cut_splits)
+        partitions_b = self._cut_tree_at_splits(total_b, cut_splits)
+        # TODO: probably getting too nested
+        # TODO: rename it to support pairs
         supports = {
-            part: self._trees_with_distinct_support(
-                {s: splits_a[s] for s in trees_a[part]},
-                {s: splits_b[s] for s in trees_b[part]},
+            partition: self._trees_with_distinct_support(
+                {split: point_a.dict_repr[split] for split in partitions_a[partition]},
+                {split: point_b.dict_repr[split] for split in partitions_b[partition]},
             )
-            for part in trees_a.keys()
-            if trees_a[part] and trees_b[part]
+            for partition in partitions_a.keys()
+            if partitions_a[partition] and partitions_b[partition]
         }
-        common = common | easy_a | easy_b
-        common_a = {s: splits_a[s] if s in sp_a else 0 for s in common}
-        common_b = {s: splits_b[s] if s in sp_b else 0 for s in common}
-        return common_a, common_b, supports
+
+        common_splits = common_splits | easy_a | easy_b
+        common_splits_with_length = {
+            split: (
+                point_a.dict_repr.get(split, 0.0),
+                point_b.dict_repr.get(split, 0.0),
+            )
+            for split in common_splits
+        }
+        return common_splits_with_length, supports
 
     def _cut_tree_at_splits(self, splits, cut_splits):
         """Cut a tree, given by splits, at all edges in cut_splits.
@@ -612,6 +657,7 @@ class GTPSolver:
             that
             the respective set of labels is spanning.
         """
+        # TODO: what's the purpose?
         partition = {tuple(range(self.n_labels)): splits}
         for cut in cut_splits:
             try:
@@ -667,27 +713,52 @@ class GTPSolver:
         old_support_b = (tuple(splits_b.keys()),)
         weights_a = {split: splits_a[split] ** 2 for split in splits_a}
         weights_b = {split: splits_b[split] ** 2 for split in splits_b}
-        while 1:
+        while True:
             new_support_a, new_support_b = tuple(), tuple()
             for pair_a, pair_b in zip(old_support_a, old_support_b):
-                pair_a_w = {s: weights_a[s] for s in pair_a}
-                pair_b_w = {s: weights_b[s] for s in pair_b}
+                pair_a_w = {split: weights_a[split] for split in pair_a}
+                pair_b_w = {split: weights_b[split] for split in pair_b}
                 value, c1, c2, d1, d2 = self._solve_extension_problem(
                     pair_a_w, pair_b_w
                 )
-                if value >= 1 - self.tol:
+
+                # BUG: empty c2 shoud probably not happen
+                if value >= 1 - self.tol or not c2:
+                    # TODO: can cache these pairs for later iterations
                     new_support_a += (pair_a,)
                     new_support_b += (pair_b,)
                 else:
                     new_support_a += (c1, c2)
                     new_support_b += (d1, d2)
+
             if len(new_support_a) == len(old_support_a):
-                return new_support_a, new_support_b
-            else:
-                old_support_a, old_support_b = new_support_a, new_support_b
+                break
+
+            old_support_a, old_support_b = new_support_a, new_support_b
+
+        return new_support_a, new_support_b
 
     @staticmethod
-    def _solve_extension_problem(sq_splits_a, sq_splits_b):
+    def _construct_incompatibility_graph(sq_splits_a, sq_splits_b):
+        total_a, total_b = sum(sq_splits_a.values()), sum(sq_splits_b.values())
+
+        graph = nx.DiGraph()
+
+        for split, weight in sq_splits_a.items():
+            graph.add_edge("source", split, capacity=weight / total_a)
+
+        for split, weight in sq_splits_b.items():
+            graph.add_edge(split, "sink", capacity=weight / total_b)
+
+        for split_a, split_b in itertools.product(
+            sq_splits_a.keys(), sq_splits_b.keys()
+        ):
+            if not split_a.is_compatible(split_b):
+                graph.add_edge(split_a, split_b)
+
+        return graph
+
+    def _solve_extension_problem(self, sq_splits_a, sq_splits_b):
         """Solve the extension problem in [1] for sets of splits with squared weights.
 
         Solving the min weight vertex cover with respect to the incompatibility graph in
@@ -740,19 +811,14 @@ class GTPSolver:
         d2 : set of Split
             Second part of B that it is split into.
         """
-        total_a, total_b = sum(sq_splits_a.values()), sum(sq_splits_b.values())
-        graph = nx.DiGraph()
-        for split, weight in sq_splits_a.items():
-            graph.add_edge("source", split, capacity=weight / total_a)
-        for split, weight in sq_splits_b.items():
-            graph.add_edge(split, "sink", capacity=weight / total_b)
-        for split_a, split_b in it.product(sq_splits_a.keys(), sq_splits_b.keys()):
-            if not split_a.is_compatible(split_b):
-                graph.add_edge(split_a, split_b)
+        graph = self._construct_incompatibility_graph(sq_splits_a, sq_splits_b)
 
         min_value, (v, v_bar) = nx.minimum_cut(graph, "source", "sink")
+
         a = set(sq_splits_a.keys())
         b = set(sq_splits_b.keys())
+
         v = set(v)
         v_bar = set(v_bar)
+        # TODO: output only v and v_bar?
         return min_value, tuple(a & v_bar), tuple(a & v), tuple(b & v_bar), tuple(b & v)

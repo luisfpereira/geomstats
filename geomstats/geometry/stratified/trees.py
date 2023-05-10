@@ -13,6 +13,7 @@ Lead author: Jonas Lueg
 
 import functools
 import itertools
+from abc import ABC
 
 import geomstats.backend as gs
 
@@ -281,6 +282,17 @@ class Split:
         o1, o2 = other.part1, other.part2
         return sum([bool(s) for s in [p1 & o1, p1 & o2, p2 & o1, p2 & o2]]) < 4
 
+    def is_compatible_with_set(self, splits):
+        """Check whether this split is compatible with a set of split.
+
+        It is compatible if the split is compatible with all the splits.
+
+        Returns
+        -------
+        is_compatible_with : bool
+        """
+        return all(map(self.is_compatible, splits))
+
     def get_part_away_from(self, other):
         """Return the part of this split that is directed away from other split.
 
@@ -382,113 +394,8 @@ class Split:
         return b1 or b2
 
 
-class BaseTopology:
-    r"""The topology of a forest, using a split-based graph-structure representation.
-
-    Parameters
-    ----------
-    n_labels : int
-        Number of labels, the set of labels is then :math:`\{0,\dots,n-1\}`.
-    partition : tuple
-        A tuple of tuples that is a partition of the set :math:`\{0,\dots,n-1\}`,
-        representing the label sets of each connected component of the forest topology.
-    split_sets : tuple
-        A tuple of tuples containing splits, where each set of splits contains only
-        splits of the respective label set in the partition, so their order
-        is related. The splits are the edges of the connected components of the forest,
-        respectively, and thus the union of all sets of splits yields all edges of the
-        forest topology.
-
-    Attributes
-    ----------
-    where : dict
-        Give the index of a split in the flattened list of all splits.
-    sep : list of int
-        An increasing list of numbers between 0 and m, where m is the total number
-        of splits in ``self.split_sets``, starting with 0, where each number
-        indicates that a new connected component starts at that index.
-        Useful for example for unraveling the tuple of all splits into
-        ``self.split_sets``.
-    paths : list of dict
-        A list of dictionaries, each dictionary is for the respective connected
-        component of the forest, and the items of each dictionary are for each pair
-        of labels u, v, u < v in the respective component, a list of the splits on the
-        unique path between the labels u and v.
-    support : list of array-like
-        For each split, give an :math:`n\times n` dimensional matrix, where the
-        uv-th entry is ``True`` if the split separates the labels u and v, else
-        ``False``.
-    """
-    # TODO: do we need all this machinery? can we simplify?
-
-    def __init__(self, n_labels, partition, split_sets):
-        self._check_init(n_labels, partition, split_sets)
-
-        self.n_labels = n_labels
-        partition = [tuple(sorted(x)) for x in partition]
-        seq = [part[0] for part in partition]
-        sort_key = sorted(range(len(seq)), key=seq.__getitem__)
-        self.partition = tuple([partition[key] for key in sort_key])
-        self.split_sets = tuple([tuple(sorted(split_sets[key])) for key in sort_key])
-
-        self.where = {s: i for i, s in enumerate(self.flatten(self.split_sets))}
-
-        lengths = [len(splits) for splits in self.split_sets]
-        self.sep = [0] + [sum(lengths[0:j]) for j in range(1, len(lengths) + 1)]
-
-        self.paths = [
-            {
-                (u, v): [s for s in splits if s.separates(u, v)]
-                for u, v in itertools.combinations(part, r=2)
-            }
-            for part, splits in zip(self.partition, self.split_sets)
-        ]
-
-        _support = [
-            gs.zeros((self.n_labels, self.n_labels), dtype=int)
-            for _ in self.flatten(self.split_sets)
-        ]
-        for path_dict in self.paths:
-            for (u, v), path in path_dict.items():
-                for split in path:
-                    _support[self.where[split]][u][v] = True
-                    _support[self.where[split]][v][u] = True
-        self.support = gs.reshape(
-            gs.array([m for m in self.flatten(_support)]), (-1, n_labels, n_labels)
-        )
-        self._chart_gradient = None
-
-    def _check_init(self, n_labels, partition, split_sets):
-        if len(split_sets) != len(partition):
-            raise ValueError(
-                "Number of split sets is not equal to number of " "components."
-            )
-        if set.union(*[set(part) for part in partition]) != set(range(n_labels)):
-            raise ValueError("The partition is not a partition of the set (0,...,n-1).")
-        for _part, _splits in zip(partition, split_sets):
-            for _sp in _splits:
-                if (_sp.part1 | _sp.part2) != set(_part):
-                    raise ValueError(
-                        f"The split {_sp} is not a split of component {_part}."
-                    )
-
-    def __eq__(self, other):
-        """Check if ``self`` is equal to ``other``.
-
-        Parameters
-        ----------
-        other : Topology
-            The other topology.
-
-        Returns
-        -------
-        is_equal : bool
-            Return ``True`` if the topologies are equal, else ``False``.
-        """
-        equal_n = self.n_labels == other.n_labels
-        equal_partition = self.partition == other.partition
-        equal_split_sets = self.split_sets == other.split_sets
-        return equal_n and equal_partition and equal_split_sets
+class BaseTopology(ABC):
+    """Base topology of a tree."""
 
     def __ge__(self, other):
         """Check if ``self`` is greater than or equal to ``other``.
@@ -521,78 +428,6 @@ class BaseTopology:
         """
         return other < self
 
-    def __hash__(self):
-        """Compute the hash of a topology.
-
-        Note that this hash simply uses the hash function for tuples.
-
-        Returns
-        -------
-        hash_of_topology : int
-            Return the hash of the topology.
-        """
-        return hash((self.n_labels, self.partition, self.split_sets))
-
-    def __le__(self, other):
-        """Check if ``self`` is less than or equal to ``other``.
-
-        This partial ordering is the one defined in [1] and to show if self <= other is
-        True, three things must be satisfied.
-        (i)     ``self.partition`` must be a refinement of ``other.partition`` in the
-                sense of partitions.
-        (ii)    The splits of each component in ``self`` must be contained in the
-                set of splits of ``other`` restricted to the component of ``self``.
-        (iii)   Whenever two components of ``self`` are contained in a component of
-                ``other``, there needs to exist a split in ``other`` separating those
-                two components.
-        If one of those three conditions are not fulfilled, this method returns False.
-
-        Parameters
-        ----------
-        other : Topology
-            The structure to which self is compared to.
-
-        Returns
-        -------
-        is_less_than_or_equal : bool
-            Return ``True`` if (i), (ii) and (iii) are satisfied, else ``False``.
-        """
-
-        class NotPartialOrder(Exception):
-            """Raise an exception when less equal is not true."""
-
-        x_parts = [set(x) for x in self.partition]
-        y_parts = [set(y) for y in other.partition]
-        # (i)
-        try:
-            cover = {
-                i: [j for j, y in enumerate(y_parts) if x.issubset(y)][0]
-                for i, x in enumerate(x_parts)
-            }
-        except IndexError:
-            return False
-        # (ii)
-        try:
-            for (i, j), x in zip(cover.items(), x_parts):
-                y_splits_restricted = {
-                    split_y.restrict_to(subset=x) for split_y in other.split_sets[j]
-                }
-                if not set(self.split_sets[i]).issubset(y_splits_restricted):
-                    raise NotPartialOrder()
-        except NotPartialOrder:
-            return False
-        # (iii)
-        try:
-            for j in range(len(y_parts)):
-                xs_in_y = [x for i, x in enumerate(x_parts) if cover[i] == j]
-                for x1, x2 in itertools.combinations(xs_in_y, r=2):
-                    sep_sp = [sp for sp in other.split_sets[j] if sp.separates(x1, x2)]
-                    if not sep_sp:
-                        raise NotPartialOrder()
-        except NotPartialOrder:
-            return False
-        return True
-
     def __lt__(self, other):
         """Check if ``self`` is less than ``other``.
 
@@ -607,111 +442,3 @@ class BaseTopology:
             Return ``True`` if ``self`` less than ``other``, else ``False``.
         """
         return self <= other and self != other
-
-    def __repr__(self):
-        """Return the string representation of the topology.
-
-        This string representation requires that one can retrieve all necessary
-        information from the string.
-
-        Returns
-        -------
-        string_of_topology : str
-            Return the string representation of the topology.
-        """
-        return str((self.n_labels, self.partition, self.split_sets))
-
-    def __str__(self):
-        """Return the fancy printable string representation of the topology.
-
-        This string representation does NOT require that one can retrieve all necessary
-        information from the string, but this string representation is required to be
-        readable by a human.
-
-        Returns
-        -------
-        string_of_topology : str
-            Return the fancy readable string representation of the topology.
-        """
-        comps = [", ".join(str(sp) for sp in splits) for splits in self.split_sets]
-        return "(" + "; ".join(comps) + ")"
-
-    def corr(self, x):
-        """Compute the correlation matrix of the topology with edge weights ``weights``.
-
-        Parameters
-        ----------
-        x : array-like, [n_splits]
-            Edge weights.
-
-        Returns
-        -------
-        corr : array-like, shape=[n, n]
-            Returns the corresponding correlation matrix.
-        """
-        corr = gs.zeros((self.n_labels, self.n_labels))
-        for path_dict in self.paths:
-            for (u, v), path in path_dict.items():
-                corr[u][v] = gs.prod([1 - x[self.where[split]] for split in path])
-                corr[v][u] = corr[u][v]
-
-        corr = gs.array(corr)
-        return corr + gs.eye(corr.shape[0])
-
-    def corr_gradient(self, x):
-        """Compute the gradient of the correlation matrix, differentiated by weights.
-
-        Parameters
-        ----------
-        x : array-like
-            The vector weights at which the gradient is computed.
-
-        Returns
-        -------
-        gradient : array-like, shape=[n_splits, n, n]
-            The gradient of the correlation matrix, differentiated by weights.
-        """
-        x_list = [[y if i != k else 0 for i, y in enumerate(x)] for k in range(len(x))]
-        gradient = gs.array(
-            [-supp * self.corr(x) for supp, x in zip(self.support, x_list)]
-        )
-        return gradient
-
-    def unflatten(self, x):
-        """Transform list into list of lists according to separators, ``self.sep``.
-
-        The separators are a list of integers, increasing. Then, all elements between to
-        indices in separators will be put into a list, and together, all lists give a
-        nested list.
-
-        Parameters
-        ----------
-        x : iterable
-            The flat list that will be nested.
-
-        Returns
-        -------
-        x_nested : list[list]
-            The nested list of lists.
-        """
-        return [x[i:j] for i, j in zip(self.sep[:-1], self.sep[1:])]
-
-    @staticmethod
-    def flatten(x):
-        """Flatten a list of lists into a single list by concatenation.
-
-        Parameters
-        ----------
-        x : nested list
-            The nested list to flatten.
-
-        Returns
-        -------
-        x_flat : list, tuple
-            The flatted list.
-        """
-        return [y for z in x for y in z]
-
-    @property
-    def n_splits(self):
-        return gs.sum(a=[len(splits) for splits in self.split_sets], dtype=int)

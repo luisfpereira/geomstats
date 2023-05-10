@@ -76,16 +76,7 @@ class Point(ABC):
     @abstractmethod
     def __hash__(self):
         """Define a hash for the point."""
-
-    @abstractmethod
-    def to_array(self):
-        """Turn the point into a numpy array.
-
-        Returns
-        -------
-        array_point : array-like, shape=[...]
-            An array representation of the Point type.
-        """
+        # TODO: do we really require this?
 
 
 class PointSet(ABC):
@@ -145,22 +136,6 @@ class PointSet(ABC):
         Returns
         -------
         samples : List of Point
-            Points sampled on the PointSet.
-        """
-
-    @abstractmethod
-    def set_to_array(self, points):
-        """Convert a set of points into an array.
-
-        Parameters
-        ----------
-        points : list of Point, shape=[...]
-            Number of samples of point type to turn
-            into an array.
-
-        Returns
-        -------
-        points_array : array-like, shape=[...]
             Points sampled on the PointSet.
         """
 
