@@ -122,6 +122,12 @@ class Topology(BaseTopology):
         self.splits = splits
         self.splits_set = set(splits)
 
+        self._check_init()
+
+    def _check_init(self):
+        if len(self.splits) != len(self.splits_set):
+            raise ValueError("Some edges are equivalent, collapse them first.")
+
     @property
     def n_labels(self):
         return len(self.splits[0].part1 | self.splits[0].part2)
@@ -557,15 +563,15 @@ class GeodesicTreePathSolver:
     def _trees_with_common_support(self, point_a, point_b):
         """Compute the support that corresponds to a geodesic for common split sets.
 
-        We refer to the splits of each tree A and B, respectively.
+        We refer to the splits of each tree ``A`` and ``B``, respectively.
         This method divides the split sets into smaller split sets that have distinct
         support and then use the method ``gtp_trees_with_distinct_support``.
         For each of these smaller subsets, return the support in a dictionary.
 
         The common splits are returned together and with the respective edge
-        lengths. A split in A that is not in B but compatible with all
-        splits of B is added to the common splits of B with length zero,
-        and vice versa for splits in B.
+        lengths. A split in ``A`` that is not in ``B`` but compatible with all
+        splits of ``B`` is added to the common splits of ``B`` with length zero,
+        and vice versa for splits in ``B``.
 
         Parameters
         ----------
@@ -577,20 +583,20 @@ class GeodesicTreePathSolver:
         Returns
         -------
         common_splits_with_length : dict[tuple[2, float]]
-            Contains the splits of A that are also in B, the splits of B
-            that are compatible with all splits in A, given edge length zero,
-            and the splits of A that are compatible with all splits in B,
+            Contains the splits of ``A`` that are also in ``B``, the splits of ``B``
+            that are compatible with all splits in ``A``, given edge length zero,
+            and the splits of ``A`` that are compatible with all splits in ``B``,
             given edge length zero.
         supports: dict
             Contains the respective support for each subtree.
         """
-        # TODO: any way of accelerating when common splits is empty?
         pendants = get_pendant_edges(self.n_labels)
 
         common_splits = point_a.topology.splits_set & point_b.topology.splits_set
+
+        # only for degenerate trees
         splits_only_a = point_a.topology.splits_set - common_splits
         splits_only_b = point_b.topology.splits_set - common_splits
-
         easy_a = {
             split
             for split in splits_only_a
@@ -605,14 +611,10 @@ class GeodesicTreePathSolver:
         total_a = (point_a.topology.splits_set | easy_b) - pendants
         total_b = (point_b.topology.splits_set | easy_a) - pendants
 
-        # TODO: review this part
-        cut_splits = (common_splits | easy_a | easy_b) - pendants
+        cut_splits = tuple((common_splits | easy_a | easy_b) - pendants)
 
-        # TODO: the concept of partition probably does not apply here
         partitions_a = self._cut_tree_at_splits(total_a, cut_splits)
         partitions_b = self._cut_tree_at_splits(total_b, cut_splits)
-        # TODO: probably getting too nested
-        # TODO: rename it to support pairs
         supports = {
             partition: self._trees_with_distinct_support(
                 {split: point_a.dict_repr[split] for split in partitions_a[partition]},
@@ -654,29 +656,29 @@ class GeodesicTreePathSolver:
             A dictionary, where the keys form a partition of the set of labels
             (0,...,n_labels-1),
             and each key is assigned the tuple of splits that are part of the subtree
-            that
-            the respective set of labels is spanning.
+            that the respective set of labels is spanning.
         """
-        # TODO: what's the purpose?
         partition = {tuple(range(self.n_labels)): splits}
         for cut in cut_splits:
-            try:
-                labels, subtree = [
-                    (_, subtree) for _, subtree in partition.items() if cut in subtree
-                ][0]
-            except IndexError:
+            for labels, subtree in partition.items():
+                if cut in subtree:
+                    break
+            else:
                 continue
-            splits = set(subtree) - {cut}
-            part1 = tuple(set(labels) & set(cut.part1))
-            part2 = tuple(set(labels) & set(cut.part2))
-            subtree1 = {s for s in splits if part1 == cut.get_part_towards(s)}
+
+            splits = subtree - {cut}
+            part1 = set(labels) & set(cut.part1)
+            part2 = set(labels) & set(cut.part2)
+            subtree1 = {
+                split for split in splits if part1 == cut.get_part_towards(split)
+            }
             subtree2 = splits - subtree1
 
             partition.pop(labels)
             partition = {
                 **partition,
-                tuple(part1): tuple(subtree1),
-                tuple(part2): tuple(subtree2),
+                tuple(part1): subtree1,
+                tuple(part2): subtree2,
             }
         return partition
 
@@ -722,9 +724,7 @@ class GeodesicTreePathSolver:
                     pair_a_w, pair_b_w
                 )
 
-                # BUG: empty c2 shoud probably not happen
-                if value >= 1 - self.tol or not c2:
-                    # TODO: can cache these pairs for later iterations
+                if value >= 1 - self.tol:
                     new_support_a += (pair_a,)
                     new_support_b += (pair_b,)
                 else:
@@ -820,5 +820,15 @@ class GeodesicTreePathSolver:
 
         v = set(v)
         v_bar = set(v_bar)
-        # TODO: output only v and v_bar?
-        return min_value, tuple(a & v_bar), tuple(a & v), tuple(b & v_bar), tuple(b & v)
+
+        c2 = tuple(a & v)
+
+        # TODO: why isn't the problem symmetric in some cases?
+        # this is just a patch to guarantee symmetric distance
+        if min_value < 1 - self.tol and not c2:
+            graph = self._construct_incompatibility_graph(sq_splits_b, sq_splits_a)
+
+            min_value, (v_bar, v) = nx.minimum_cut(graph, "source", "sink")
+            c2 = tuple(a & v)
+
+        return min_value, tuple(a & v_bar), c2, tuple(b & v_bar), tuple(b & v)
