@@ -41,11 +41,10 @@ References
 """
 
 import itertools
-
-import scipy
+from abc import ABC
 
 import geomstats.backend as gs
-from geomstats.geometry.spd_matrices import SPDMatrices, SPDMetricEuclidean
+from geomstats.geometry.spd_matrices import SPDEuclideanMetric, SPDMatrices
 from geomstats.geometry.stratified.point_set import (
     Point,
     PointSet,
@@ -58,10 +57,13 @@ from geomstats.geometry.stratified.trees import (
     delete_splits,
     generate_splits,
 )
+from geomstats.numerics.optimizers import ScipyMinimize
+
+# TODO: update docstrings
 
 
 def make_splits(n_labels):
-    """Generates all possible splits of a collection."""
+    """Generate all possible splits of a collection."""
     if n_labels <= 1:
         raise ValueError("`n_labels` must be greater than 1.")
     if n_labels == 2:
@@ -74,7 +76,7 @@ def make_splits(n_labels):
 
 
 def make_topologies(n_labels):
-    """Generates all possible sets of compatible splits of a collection.
+    """Generate all possible sets of compatible splits of a collection.
 
     This only works well for `len(n_labels) < 8`.
     """
@@ -82,7 +84,6 @@ def make_topologies(n_labels):
         raise ValueError("The collection must have 2 elements or more.")
     if n_labels in [2, 3]:
         yield Topology(
-            n_labels=n_labels,
             partition=(tuple(range(n_labels)),),
             split_sets=(list(make_splits(n_labels)),),
         )
@@ -93,7 +94,7 @@ def make_topologies(n_labels):
                 new_split_set = [pendant_split]
                 a, b = set(s.part1), set(s.part2)
                 for t in st.split_sets[0]:
-                    c, d = set(t.part1), set(t.part2)
+                    _, d = set(t.part1), set(t.part2)
                     if t != s:
                         # TODO: probably a bug here
                         if a.issubset(d) or b.issubset(d):
@@ -116,7 +117,6 @@ def make_topologies(n_labels):
                             Split(part1=s.part2, part2=s.part1.union((n_labels - 1,)))
                         )
                 yield Topology(
-                    n_labels=n_labels,
                     partition=(tuple(range(n_labels)),),
                     split_sets=(new_split_set,),
                 )
@@ -185,10 +185,12 @@ def generate_random_wald(n_labels, p_keep, p_new, btol=1e-8, check=True):
         for part, splits in zip(partition, split_sets)
     ]
 
-    top = Topology(n_labels=n_labels, partition=partition, split_sets=split_sets)
-    x = gs.random.uniform(size=(len(top.flatten(split_sets)),), low=0, high=1)
-    x = gs.minimum(gs.maximum(btol, x), 1 - btol)
-    return Wald(topology=top, weights=x)
+    topology = Topology(partition=partition, split_sets=split_sets)
+    weights = gs.random.uniform(
+        size=(len(topology.flatten(split_sets)),), low=0, high=1
+    )
+    weights = gs.minimum(gs.maximum(btol, weights), 1 - btol)
+    return Wald(topology=topology, weights=weights)
 
 
 class Topology(BaseTopology):
@@ -196,8 +198,6 @@ class Topology(BaseTopology):
 
     Parameters
     ----------
-    n_labels : int
-        Number of labels, the set of labels is then :math:`\{0,\dots,n-1\}`.
     partition : tuple
         A tuple of tuples that is a partition of the set :math:`\{0,\dots,n-1\}`,
         representing the label sets of each connected component of the forest topology.
@@ -210,6 +210,8 @@ class Topology(BaseTopology):
 
     Attributes
     ----------
+    n_labels : int
+        Number of labels, the set of labels is then :math:`\{0,\dots,n-1\}`.
     where : dict
         Give the index of a split in the flattened list of all splits.
     sep : list of int
@@ -228,21 +230,24 @@ class Topology(BaseTopology):
         uv-th entry is ``True`` if the split separates the labels u and v, else
         ``False``.
     """
-    # TODO: do we need n_labels?
 
-    def __init__(self, n_labels, partition, split_sets):
-        self._check_init(n_labels, partition, split_sets)
+    def __init__(self, partition, split_sets):
+        self._check_init(partition, split_sets)
 
         super().__init__()
 
-        self.n_labels = n_labels
-        partition = [tuple(sorted(x)) for x in partition]
+        self.n_labels = len(set.union(*[set(part) for part in partition]))
+
+        partition = [tuple(sorted(part)) for part in partition]
         seq = [part[0] for part in partition]
         sort_key = sorted(range(len(seq)), key=seq.__getitem__)
+
         self.partition = tuple([partition[key] for key in sort_key])
         self.split_sets = tuple([tuple(sorted(split_sets[key])) for key in sort_key])
 
-        self.where = {s: i for i, s in enumerate(self.flatten(self.split_sets))}
+        self.where = {
+            split_set: i for i, split_set in enumerate(self.flatten(self.split_sets))
+        }
 
         lengths = [len(splits) for splits in self.split_sets]
         self.sep = [0] + [sum(lengths[0:j]) for j in range(1, len(lengths) + 1)]
@@ -255,32 +260,31 @@ class Topology(BaseTopology):
             for part, splits in zip(self.partition, self.split_sets)
         ]
 
-        _support = [
+        support = [
             gs.zeros((self.n_labels, self.n_labels), dtype=int)
             for _ in self.flatten(self.split_sets)
         ]
         for path_dict in self.paths:
             for (u, v), path in path_dict.items():
                 for split in path:
-                    _support[self.where[split]][u][v] = True
-                    _support[self.where[split]][v][u] = True
+                    support[self.where[split]][u][v] = True
+                    support[self.where[split]][v][u] = True
         self.support = gs.reshape(
-            gs.array([m for m in self.flatten(_support)]), (-1, n_labels, n_labels)
+            gs.array([m for m in self.flatten(support)]),
+            (-1, self.n_labels, self.n_labels),
         )
-        self._chart_gradient = None
 
-    def _check_init(self, n_labels, partition, split_sets):
+    def _check_init(self, partition, split_sets):
         if len(split_sets) != len(partition):
             raise ValueError(
-                "Number of split sets is not equal to number of " "components."
+                "Number of split sets is not equal to number of components."
             )
-        if set.union(*[set(part) for part in partition]) != set(range(n_labels)):
-            raise ValueError("The partition is not a partition of the set (0,...,n-1).")
-        for _part, _splits in zip(partition, split_sets):
-            for _sp in _splits:
-                if (_sp.part1 | _sp.part2) != set(_part):
+
+        for part, splits in zip(partition, split_sets):
+            for split in splits:
+                if (split.part1 | split.part2) != set(part):
                     raise ValueError(
-                        f"The split {_sp} is not a split of component {_part}."
+                        f"The split {split} is not a split of component {part}."
                     )
 
     def __eq__(self, other):
@@ -405,12 +409,12 @@ class Topology(BaseTopology):
     def n_splits(self):
         return gs.sum(a=[len(splits) for splits in self.split_sets], dtype=int)
 
-    def corr(self, x):
-        """Compute the correlation matrix of the topology with edge weights ``weights``.
+    def corr(self, weights):
+        """Compute the correlation matrix of the topology with given edge weights.
 
         Parameters
         ----------
-        x : array-like, [n_splits]
+        weights : array-like, shape=[n_splits]
             Edge weights.
 
         Returns
@@ -421,18 +425,18 @@ class Topology(BaseTopology):
         corr = gs.zeros((self.n_labels, self.n_labels))
         for path_dict in self.paths:
             for (u, v), path in path_dict.items():
-                corr[u][v] = gs.prod([1 - x[self.where[split]] for split in path])
+                corr[u][v] = gs.prod([1 - weights[self.where[split]] for split in path])
                 corr[v][u] = corr[u][v]
 
         corr = gs.array(corr)
         return corr + gs.eye(corr.shape[0])
 
-    def corr_gradient(self, x):
-        """Compute the gradient of the correlation matrix, differentiated by weights.
+    def corr_gradient(self, weights):
+        """Compute the gradient of the correlation matrix differentiated by weights.
 
         Parameters
         ----------
-        x : array-like
+        weights : array-like, shape=[n_splits]
             The vector weights at which the gradient is computed.
 
         Returns
@@ -440,14 +444,20 @@ class Topology(BaseTopology):
         gradient : array-like, shape=[n_splits, n, n]
             The gradient of the correlation matrix, differentiated by weights.
         """
-        x_list = [[y if i != k else 0 for i, y in enumerate(x)] for k in range(len(x))]
+        weights_list = [
+            [y if i != k else 0 for i, y in enumerate(weights)]
+            for k in range(len(weights))
+        ]
         gradient = gs.array(
-            [-supp * self.corr(x) for supp, x in zip(self.support, x_list)]
+            [
+                -supp * self.corr(weights_)
+                for supp, weights_ in zip(self.support, weights_list)
+            ]
         )
         return gradient
 
     def unflatten(self, x):
-        """Transform list into list of lists according to separators, ``self.sep``.
+        """Transform list into list of lists according to separators ``self.sep``.
 
         The separators are a list of integers, increasing. Then, all elements between to
         indices in separators will be put into a list, and together, all lists give a
@@ -497,11 +507,10 @@ class Wald(Point):
     """
 
     def __init__(self, topology, weights):
-        # TODO: need to be consistent with BHV space
         super().__init__()
         self.topology = topology
         self.weights = weights
-        # TODO: do we need to compute it? specially for BHV space
+        # TODO: do we need to compute it?
         self.corr = self.topology.corr(weights)
 
     @property
@@ -591,13 +600,22 @@ class WaldSpace(PointSet):
         WaldSpace is embedded into.
     """
 
-    def __init__(self, n_labels):
-        super().__init__(equip=False)
+    def __init__(self, n_labels, equip=True):
+        super().__init__(equip=equip)
         self.n_labels = n_labels
 
-        if ambient_space is None:
-            ambient_space = SPDMatrices(n=self.n_labels)
-        self.ambient_space = ambient_space
+        self.ambient_space = SPDMatrices(n=self.n_labels, equip=False)
+        # TODO: pass it as input?
+        self.projection_solver = LocalProjectionSolver()
+
+    @staticmethod
+    def default_metric():
+        """Metric to equip the space with if equip is True."""
+        return WaldSpaceMetric
+
+    @property
+    def stratum_metric(self):
+        return self.ambient_space.metric
 
     @_vectorize_point((1, "point"))
     def belongs(self, point):
@@ -681,6 +699,21 @@ class WaldSpace(PointSet):
         results = gs.array([wald.to_array() for wald in points])
         return results
 
+    def lift(self, point):
+        """Lift a point to the ambient space.
+
+        Returns
+        -------
+        ambient_point : array-like, shape=[..., n_labels, n_labels]
+        """
+        # TODO: handle vectorization
+        # TODO: is extend a better name?
+        return point.corr
+
+    def projection(self, ambient_point, **kwargs):
+        """Projects a point into Wald space."""
+        return self.projection_solver.projection(self, ambient_point, **kwargs)
+
 
 class WaldSpaceMetric(PointSetMetric):
     # TODO: delete
@@ -693,103 +726,123 @@ class WaldSpaceMetric(PointSetMetric):
 
     # s_proj needs _proj_target_gradient (changes with ambient metric)
     # _proj_target_gradient needs s_chart_and_gradient
-    # s_chart and s_chart_gradient available in ftools and do not depend in ambient metric
+    # s_chart and s_chart_gradient available in ftools and do not
+    # depend in ambient metric
 
     # straightning-ext needs: a_log, a_exp, s_proj, starting path (e.g. naive)
-    def __init__(self, space, projection_solver):
-        super().__init__(space)
-        self.projection_solver = projection_solver
-        # TODO: geodesic algorithm?
 
-    @property
-    def stratum_metric(self):
-        return self.space.ambient_space.metric
+    def squared_dist(self, point_a, point_b):
+        """Compute the squared distance between two points.
 
-    def dist(self):
-        pass
+        Parameters
+        ----------
+        point_a : Wald or list[Wald]
+            A point in wald space.
+        point_b : Wald or list[Wald]
+            A point in BHV Space.
+
+        Returns
+        -------
+        squared_dist : float or gs.array
+            The squared distance between the two points.
+        """
+        # TODO: handle vectorization
+
+        ambient_point_a = self._space.lift(point_a)
+        ambient_point_b = self._space.lift(point_b)
+
+        return self._space.stratum_metric.squared_dist(ambient_point_a, ambient_point_b)
+
+    def dist(self, point_a, point_b):
+        """Compute the distance between two points.
+
+        Parameters
+        ----------
+        point_a : Wald or list[Wald]
+            A point in wald space.
+        point_b : Wald or list[Wald]
+            A point in wald space.
+
+        Returns
+        -------
+        dist : float
+            The distance between the two points.
+        """
+        return gs.sqrt(self.squared_dist(point_a, point_b))
 
     def geodesic(self):
         pass
 
-    def lift(self, point):
-        """Lift a point to the ambient space.
 
-        Returns
-        -------
-        ambient_point : array-like, shape=[..., n_labels, n_labels]
-        """
-        # TODO: is extend a better name?
-        # TODO: here or in space? (probably in space, since not metric dep)
-        return point.corr
-
-    def projection(self, ambient_point, **kwargs):
-        """Projects a point into Wald space."""
-        return self.projection_solver.projection(self, ambient_point, **kwargs)
-
-
-class BaseProjectionSolver:
+class _BaseProjectionSolver(ABC):
+    # TODO: make it more complete
     def __init__(self):
+        # TODO: move this to metric?
+        # TODO: need to see how connected this is to the solver
         self._map_ambient_metric_to_target_gradient = {
-            SPDMetricEuclidean: self._euclidean_target_gradient,
+            SPDEuclideanMetric: self._euclidean_target_gradient,
         }
 
-    def _euclidean_target_gradient(self, weights, topology, ambient_point, metric):
-        # TODO: should this be based on lift and lift_grad?
+    def _euclidean_target_gradient(self, weights, topology, ambient_point, space):
         corr = topology.corr(weights)
         grad = topology.corr_gradient(weights)
 
-        target = metric.stratum_metric.squared_dist(corr, ambient_point)
+        target = space.stratum_metric.squared_dist(corr, ambient_point)
         target_grad = gs.array(
             [2 * gs.sum((corr - ambient_point) * grad_) for grad_ in grad]
         )
 
         return target, target_grad
 
-    def _proj_target_gradient(self, metric, ambient_point, topology):
+    def _proj_target_gradient(self, space, ambient_point, topology):
         metric_target_gradient = self._map_ambient_metric_to_target_gradient[
-            type(metric.stratum_metric)
+            type(space.stratum_metric)
         ]
 
         return lambda x: metric_target_gradient(
-            weights=x, topology=topology, ambient_point=ambient_point, metric=metric
+            weights=x,
+            topology=topology,
+            ambient_point=ambient_point,
+            space=space,
         )
 
 
-class LocalProjectionSolver(BaseProjectionSolver):
-    def __init__(self, btol=1e-10, **kwargs):
-        # TODO: use optimizers
-        super().__init__()
-        self._minimize = scipy.optimize.minimize
+class LocalProjectionSolver(_BaseProjectionSolver):
+    # TODO: may need to handle geodesic due to different inputs?
 
+    # BUG: projection gets fully ones sometimes (Eucludian)
+
+    def __init__(self, btol=1e-10):
+        super().__init__()
         self.btol = btol
-        self.optimization_kwargs = dict(
-            jac=True,
+
+        self.optimizer = ScipyMinimize(
             method="L-BFGS-B",
-            tol=None,
+            jac=True,
             options=dict(gtol=1e-5, ftol=2.22e-9),
         )
-        self.optimization_kwargs.update(kwargs)
 
     def _get_bounds(self, n_splits):
         return [(self.btol, 1 - self.btol)] * n_splits
 
-    def projection(self, metric, ambient_point, topology):
+    def projection(self, space, ambient_point, topology):
         if len(topology.partition) == topology.n_labels:
-            return Wald(topology=topology, weights=gs.ones(self.n_labels))
+            return Wald(topology=topology, weights=gs.ones(topology.n_labels))
 
         target_and_gradient = self._proj_target_gradient(
-            metric=metric,
+            space=space,
             ambient_point=ambient_point,
             topology=topology,
         )
 
         n_splits = topology.n_splits
-        bounds = self._get_bounds(n_splits)
+        self.optimizer.bounds = self._get_bounds(n_splits)
 
         x0 = gs.ones(n_splits) * 0.5
 
-        res = self._minimize(
-            target_and_gradient, x0, bounds=bounds, **self.optimization_kwargs
+        res = self.optimizer.minimize(
+            target_and_gradient,
+            x0,
         )
 
         if res.status != 0:
