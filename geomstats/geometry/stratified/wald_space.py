@@ -41,10 +41,25 @@ References
 """
 
 import itertools
+import warnings
 from abc import ABC
 
+# TODO: add to backend?
+from scipy.linalg import solve_continuous_lyapunov
+
 import geomstats.backend as gs
-from geomstats.geometry.spd_matrices import SPDEuclideanMetric, SPDMatrices
+from geomstats.geometry.full_rank_correlation_matrices import (
+    FullRankCorrelationAffineQuotientMetric,
+    FullRankCorrelationMatrices,
+)
+from geomstats.geometry.matrices import Matrices
+from geomstats.geometry.spd_matrices import (
+    SPDAffineMetric,
+    SPDBuresWassersteinMetric,
+    SPDEuclideanMetric,
+    SPDLogEuclideanMetric,
+    SPDMatrices,
+)
 from geomstats.geometry.stratified.point_set import (
     Point,
     PointSet,
@@ -60,6 +75,8 @@ from geomstats.geometry.stratified.trees import (
 from geomstats.numerics.optimizers import ScipyMinimize
 
 # TODO: update docstrings
+
+# TODO: get path to compare difference in distance (add test on this)
 
 
 def make_splits(n_labels):
@@ -473,6 +490,7 @@ class Topology(BaseTopology):
         x_nested : list[list]
             The nested list of lists.
         """
+        # TODO: make private
         # TODO: check if it is really required
         return [x[i:j] for i, j in zip(self.sep[:-1], self.sep[1:])]
 
@@ -490,6 +508,7 @@ class Topology(BaseTopology):
         x_flat : list, tuple
             The flatted list.
         """
+        # TODO: make private
         # TODO: check if it is really required
         return [y for z in x for y in z]
 
@@ -510,8 +529,9 @@ class Wald(Point):
         super().__init__()
         self.topology = topology
         self.weights = weights
-        # TODO: do we need to compute it?
-        self.corr = self.topology.corr(weights)
+
+        self._corr = None
+        self._corr_grad = None
 
     @property
     def n_labels(self):
@@ -583,6 +603,39 @@ class Wald(Point):
         """
         return self.corr
 
+    @property
+    def corr(self):
+        """Compute the correlation matrix of the wald.
+
+        Returns
+        -------
+        corr : array-like, shape=[n, n]
+            Returns the corresponding correlation matrix.
+        """
+        if self._corr is None:
+            self._corr = self.topology.corr(self.weights)
+
+        return self._corr
+
+    @property
+    def corr_gradient(self):
+        """Compute the gradient of the correlation matrix differentiated by weights.
+
+        Parameters
+        ----------
+        weights : array-like, shape=[n_splits]
+            The vector weights at which the gradient is computed.
+
+        Returns
+        -------
+        gradient : array-like, shape=[n_splits, n, n]
+            The gradient of the correlation matrix, differentiated by weights.
+        """
+        if self._corr_grad is None:
+            self._corr_grad = self.topology.corr_gradient(self.weights)
+
+        return self._corr_grad
+
 
 class WaldSpace(PointSet):
     """Class for the Wald space, a metric space for phylogenetic forests.
@@ -603,15 +656,12 @@ class WaldSpace(PointSet):
     def __init__(self, n_labels, equip=True):
         super().__init__(equip=equip)
         self.n_labels = n_labels
-
-        self.ambient_space = SPDMatrices(n=self.n_labels, equip=False)
-        # TODO: pass it as input?
         self.projection_solver = LocalProjectionSolver()
 
     @staticmethod
     def default_metric():
         """Metric to equip the space with if equip is True."""
-        return WaldSpaceMetric
+        return WaldSpaceAffineMetric
 
     @property
     def stratum_metric(self):
@@ -715,7 +765,7 @@ class WaldSpace(PointSet):
         return self.projection_solver.projection(self, ambient_point, **kwargs)
 
 
-class WaldSpaceMetric(PointSetMetric):
+class _WaldSpaceMetric(PointSetMetric):
     # TODO: delete
 
     # geodesic algorithms
@@ -774,37 +824,206 @@ class WaldSpaceMetric(PointSetMetric):
         pass
 
 
-class _BaseProjectionSolver(ABC):
-    # TODO: make it more complete
-    def __init__(self):
-        # TODO: move this to metric?
-        # TODO: need to see how connected this is to the solver
-        self._map_ambient_metric_to_target_gradient = {
-            SPDEuclideanMetric: self._euclidean_target_gradient,
-        }
+class WaldSpaceAffineMetric(_WaldSpaceMetric):
+    def __init__(self, space):
+        super().__init__(space=space)
 
-    def _euclidean_target_gradient(self, weights, topology, ambient_point, space):
-        corr = topology.corr(weights)
-        grad = topology.corr_gradient(weights)
+        if hasattr(space, "ambient_space"):
+            warnings.warn("Replacing ambient space.")
 
-        target = space.stratum_metric.squared_dist(corr, ambient_point)
-        target_grad = gs.array(
-            [2 * gs.sum((corr - ambient_point) * grad_) for grad_ in grad]
+        space.ambient_space = SPDMatrices(n=space.n_labels, equip=False)
+        space.ambient_space.equip_with_metric(SPDAffineMetric)
+
+    def projection_target_gradient(self, topology, ambient_point):
+
+        ambient_point_sqrt = gs.linalg.sqrtm(ambient_point)
+        ambient_point_inv_sqrtm = gs.linalg.sqrtm(gs.linalg.inv(ambient_point))
+
+        def target_and_gradient(weights):
+            target_point = Wald(topology, weights)
+
+            target = self._space.stratum_metric.squared_dist(
+                target_point.corr, ambient_point
+            )
+            corr_inv = gs.linalg.inv(target_point.corr)
+
+            tmp = gs.linalg.logm(
+                Matrices.mul(
+                    ambient_point_inv_sqrtm,
+                    target_point.corr,
+                    ambient_point_inv_sqrtm,
+                )
+            )
+
+            target_grad = gs.array(
+                [
+                    0.5
+                    * gs.trace(
+                        Matrices.mul(
+                            tmp,
+                            ambient_point_sqrt,
+                            corr_inv,
+                            grad,
+                            ambient_point_inv_sqrtm,
+                        )
+                    )
+                    for grad in target_point.corr_gradient
+                ]
+            )
+
+            return target, target_grad
+
+        return target_and_gradient
+
+
+class WaldSpaceEuclideanMetric(_WaldSpaceMetric):
+    def __init__(self, space):
+        super().__init__(space=space)
+
+        if hasattr(space, "ambient_space"):
+            warnings.warn("Replacing ambient space.")
+
+        space.ambient_space = SPDMatrices(n=space.n_labels, equip=False)
+        space.ambient_space.equip_with_metric(SPDEuclideanMetric)
+
+    def projection_target_gradient(self, topology, ambient_point):
+        def target_and_gradient(weights):
+            target_point = Wald(topology, weights)
+
+            target = self._space.stratum_metric.squared_dist(
+                target_point.corr, ambient_point
+            )
+            target_grad = gs.array(
+                [
+                    2 * gs.sum((target_point.corr - ambient_point) * grad)
+                    for grad in target_point.corr_gradient
+                ]
+            )
+
+            return target, target_grad
+
+        return target_and_gradient
+
+
+def _shared_projection_target_gradient(space, topology, ambient_point):
+    # shared by WaldSpaceBuresWassersteinMetric and WaldSpaceLogEuclideanMetric
+    ambient_point_sqrt = gs.linalg.sqrtm(ambient_point)
+
+    def target_and_gradient(weights):
+        target_point = Wald(topology, weights)
+
+        target = space.stratum_metric.squared_dist(target_point.corr, ambient_point)
+
+        tmp = gs.linalg.sqrtm(
+            Matrices.mul(ambient_point_sqrt, target_point.corr, ambient_point_sqrt)
         )
+
+        h_list = gs.array(
+            [
+                solve_continuous_lyapunov(
+                    a=tmp,
+                    q=Matrices.mul(ambient_point_sqrt, grad, ambient_point_sqrt),
+                )
+                for grad in target_point.corr_gradient
+            ]
+        )
+
+        target_grad = -2.0 * gs.array(gs.trace(h_list))
 
         return target, target_grad
 
-    def _proj_target_gradient(self, space, ambient_point, topology):
-        metric_target_gradient = self._map_ambient_metric_to_target_gradient[
-            type(space.stratum_metric)
-        ]
+    return target_and_gradient
 
-        return lambda x: metric_target_gradient(
-            weights=x,
-            topology=topology,
-            ambient_point=ambient_point,
-            space=space,
-        )
+
+class WaldSpaceBuresWassersteinMetric(_WaldSpaceMetric):
+    def __init__(self, space):
+        super().__init__(space=space)
+
+        if hasattr(space, "ambient_space"):
+            warnings.warn("Replacing ambient space.")
+
+        space.ambient_space = SPDMatrices(n=space.n_labels, equip=False)
+        space.ambient_space.equip_with_metric(SPDBuresWassersteinMetric)
+
+    def projection_target_gradient(self, topology, ambient_point):
+        return _shared_projection_target_gradient(self._space, topology, ambient_point)
+
+
+class WaldSpaceLogEuclideanMetric(_WaldSpaceMetric):
+    def __init__(self, space):
+        super().__init__(space=space)
+
+        if hasattr(space, "ambient_space"):
+            warnings.warn("Replacing ambient space.")
+
+        space.ambient_space = SPDMatrices(n=space.n_labels, equip=False)
+        space.ambient_space.equip_with_metric(SPDLogEuclideanMetric)
+
+    def projection_target_gradient(self, topology, ambient_point):
+        return _shared_projection_target_gradient(self._space, topology, ambient_point)
+
+
+class WaldSpaceCorrelationQuotientMetric(_WaldSpaceMetric):
+    def __init__(self, space):
+        super().__init__(space=space)
+
+        if hasattr(space, "ambient_space"):
+            warnings.warn("Replacing ambient space.")
+
+        space.ambient_space = FullRankCorrelationMatrices(n=space.n_labels, equip=False)
+        space.ambient_space.equip_with_metric(FullRankCorrelationAffineQuotientMetric)
+
+    def projection_target_gradient(self, topology, ambient_point):
+        quotient_metric = self._space.stratum_metric
+        fiber_bundle = quotient_metric.fiber_bundle
+
+        def target_and_gradient(weights):
+            target_point = Wald(topology, weights)
+
+            opt_ambient_point = fiber_bundle.align(ambient_point, target_point.corr)
+
+            target = fiber_bundle.total_space.metric.squared_dist(
+                target_point.corr, opt_ambient_point
+            )
+
+            opt_ambient_point_sqrt = gs.linalg.sqrtm(opt_ambient_point)
+            opt_ambient_point_inv_sqrt = gs.linalg.sqrtm(
+                gs.linalg.inv(opt_ambient_point)
+            )
+
+            tmp = gs.linalg.logm(
+                Matrices.mul(
+                    opt_ambient_point_inv_sqrt,
+                    target_point.corr,
+                    opt_ambient_point_inv_sqrt,
+                )
+            )
+            corr_inv = gs.linalg.inv(target_point.corr)
+
+            target_grad = gs.array(
+                [
+                    0.5
+                    * gs.trace(
+                        Matrices.mul(
+                            tmp,
+                            opt_ambient_point_sqrt,
+                            corr_inv,
+                            grad,
+                            opt_ambient_point_inv_sqrt,
+                        )
+                    )
+                    for grad in target_point.corr_gradient
+                ]
+            )
+
+            return target, target_grad
+
+        return target_and_gradient
+
+
+class _BaseProjectionSolver(ABC):
+    # TODO: complete
+    pass
 
 
 class LocalProjectionSolver(_BaseProjectionSolver):
@@ -829,10 +1048,8 @@ class LocalProjectionSolver(_BaseProjectionSolver):
         if len(topology.partition) == topology.n_labels:
             return Wald(topology=topology, weights=gs.ones(topology.n_labels))
 
-        target_and_gradient = self._proj_target_gradient(
-            space=space,
-            ambient_point=ambient_point,
-            topology=topology,
+        target_and_gradient = space.metric.projection_target_gradient(
+            topology, ambient_point
         )
 
         n_splits = topology.n_splits
