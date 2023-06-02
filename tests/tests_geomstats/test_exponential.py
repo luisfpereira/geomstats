@@ -3,7 +3,6 @@
 from scipy.stats import expon
 
 import geomstats.backend as gs
-import tests.conftest
 from tests.conftest import Parametrizer, np_backend
 from tests.data.exponential_data import ExponentialMetricTestData, ExponentialTestData
 from tests.geometry_test_cases import OpenSetTestCase, RiemannianMetricTestCase
@@ -12,7 +11,6 @@ NOT_AUTODIFF = np_backend()
 
 
 class TestExponential(OpenSetTestCase, metaclass=Parametrizer):
-
     testing_data = ExponentialTestData()
 
     def test_belongs(self, point, expected):
@@ -24,7 +22,6 @@ class TestExponential(OpenSetTestCase, metaclass=Parametrizer):
     def test_sample_shape(self, point, n_samples, expected):
         self.assertAllClose(self.Space().sample(point, n_samples).shape, expected)
 
-    @tests.conftest.np_and_autograd_only
     def test_point_to_pdf(self, point, n_samples):
         space = self.Space()
         point = gs.to_ndarray(point, 1)

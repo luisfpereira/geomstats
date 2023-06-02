@@ -39,10 +39,10 @@ class OdeResult(scipy.optimize.OptimizeResult):
 
         Assumes last `t` is the same.
         """
-        if gs.is_array(self.y):
-            return self.y[-1]
+        if isinstance(self.y, (list, tuple)):
+            return gs.stack([y_[-1] for y_ in self.y])
 
-        return gs.stack([y_[-1] for y_ in self.y])
+        return self.y[-1]
 
 
 class ODEIVPSolver(ABC):
@@ -314,7 +314,7 @@ class ScipySolveIVP(ODEIVPSolver):
             initial_state,
             method=self.method,
             t_eval=t_eval,
-            **self.options
+            **self.options,
         )
         result = result_to_backend_type(result)
         result.y = gs.moveaxis(result.y, 0, -1)
