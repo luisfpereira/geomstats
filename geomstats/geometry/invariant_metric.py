@@ -1138,6 +1138,7 @@ class BiInvariantMetric(RiemannianMetric):
 
         super().__init__(space=space)
         if self._space.point_ndim == 1:
+            # TODO: remove asap
             # keeps behavior before removing inheritance
             self.left = True
 
@@ -1145,62 +1146,6 @@ class BiInvariantMetric(RiemannianMetric):
         # TODO (nguigs): implement it for SE(3)
         if not ("SpecialOrthogonal" in space.__str__() or "SO" in space.__str__()):
             raise ValueError("The bi-invariant metric is only implemented for SO(n)")
-
-    def exp(self, tangent_vec, base_point=None):
-        """Compute Riemannian exponential of tangent vector from the identity.
-
-        For a bi-invariant metric, this corresponds to the group exponential.
-
-        Parameters
-        ----------
-        tangent_vec :
-            Tangent vector at identity.
-        base_point : array-like, shape=[..., {dim, [n, n]}]
-            Point in the group.
-            Optional, default : identity.
-
-        Returns
-        -------
-        exp : array-like, shape=[..., {dim, [n, n]}]
-            Point in the group.
-
-        References
-        ----------
-        .. [GQ2020] Gallier, Jean, and Jocelyn Quaintance. Differential
-            Geometry and Lie Groups: A Computational Perspective.
-            Geonger International Publishing, 2020.
-            https://doi.org/10.1007/978-3-030-46040-2.
-        """
-        return self._space.exp(tangent_vec, base_point)
-
-    def log(self, point, base_point=None):
-        """Compute Riemannian logarithm of a point wrt the identity.
-
-        For a bi-invariant metric this corresponds to the group logarithm.
-
-        Parameters
-        ----------
-        point : array-like, shape=[..., {dim, [n, n]}]
-            Point in the group.
-        base_point : array-like, shape=[..., {dim, [n, n]}]
-            Point in the group.
-            Optional, default : identity.
-
-        Returns
-        -------
-        log : array-like, shape=[..., {dim, [n, n]}]
-            Tangent vector at the identity equal to the Riemannian logarithm
-            of point at the identity.
-
-        References
-        ----------
-        .. [GQ2020] Gallier, Jean, and Jocelyn Quaintance. Differential
-            Geometry and Lie Groups: A Computational Perspective.
-            Geonger International Publishing, 2020.
-            https://doi.org/10.1007/978-3-030-46040-2.
-        """
-        log = self._space.log(point, base_point)
-        return self._space.to_tangent(log, base_point)
 
     def inner_product_at_identity(self, tangent_vec_a, tangent_vec_b):
         """Compute inner product at tangent space at identity.
@@ -1217,6 +1162,7 @@ class BiInvariantMetric(RiemannianMetric):
         inner_prod : array-like, shape=[...]
             Inner-product of the two tangent vectors.
         """
+        # TODO: replace by call to lie_algebra
         if self._space.point_ndim == 1:
             return gs.dot(tangent_vec_a, tangent_vec_b)
 
@@ -1258,6 +1204,78 @@ class BiInvariantMetric(RiemannianMetric):
         tangent_vec_a_at_id = tangent_translation(tangent_vec_a)
         tangent_vec_b_at_id = tangent_translation(tangent_vec_b)
         return self.inner_product_at_identity(tangent_vec_a_at_id, tangent_vec_b_at_id)
+
+    def exp(self, tangent_vec, base_point=None):
+        """Compute Riemannian exponential of tangent vector.
+
+        Parameters
+        ----------
+        tangent_vec :
+            Tangent vector at base point.
+        base_point : array-like, shape=[..., {dim, [n, n]}]
+            Point in the group.
+            Optional, default : identity.
+
+        Returns
+        -------
+        exp : array-like, shape=[..., {dim, [n, n]}]
+            Point in the group.
+
+        References
+        ----------
+        .. [GQ2020] Gallier, Jean, and Jocelyn Quaintance. Differential
+            Geometry and Lie Groups: A Computational Perspective.
+            Geonger International Publishing, 2020.
+            https://doi.org/10.1007/978-3-030-46040-2.
+        """
+        if base_point is None:
+            return self._space.exp(tangent_vec)
+
+        tangent_vec_at_id = self._space.tangent_translation_map(
+            base_point, left=True, inverse=True
+        )(tangent_vec)
+
+        return self._space.compose(base_point, self._space.exp(tangent_vec_at_id))
+
+    def log(self, point, base_point=None):
+        """Compute Riemannian logarithm of a point wrt the identity.
+
+        For a bi-invariant metric this corresponds to the group logarithm.
+
+        Parameters
+        ----------
+        point : array-like, shape=[..., {dim, [n, n]}]
+            Point in the group.
+        base_point : array-like, shape=[..., {dim, [n, n]}]
+            Point in the group.
+            Optional, default : identity.
+
+        Returns
+        -------
+        log : array-like, shape=[..., {dim, [n, n]}]
+            Tangent vector at the identity equal to the Riemannian logarithm
+            of point at the identity.
+
+        References
+        ----------
+        .. [GQ2020] Gallier, Jean, and Jocelyn Quaintance. Differential
+            Geometry and Lie Groups: A Computational Perspective.
+            Geonger International Publishing, 2020.
+            https://doi.org/10.1007/978-3-030-46040-2.
+        """
+        if base_point is None:
+            return self._space.log(point)
+
+        point_ = self._space.compose(self._space.inverse(base_point), point)
+
+        tangent_vec_at_id = self._space.log(point_)
+        tangent_vec = self._space.tangent_translation_map(
+            base_point, left=True, inverse=False
+        )(tangent_vec_at_id)
+
+        # TODO: do to tangent?
+        # return self._space.to_tangent(log, base_point)
+        return tangent_vec
 
     def parallel_transport(
         self, tangent_vec, base_point, direction=None, end_point=None

@@ -242,41 +242,43 @@ class _SpecialOrthogonalMatrices(MatrixLieGroup, LevelSet):
             gs.isclose(sq_rot_mat1, sq_rot_mat2), axis=(-2, -1)
         )
 
-    def log(self, point, base_point=None):
-        r"""
-        Compute the group logarithm of point at base_point.
+    # TODO: review antipodals
+    # def log(self, point, base_point=None):
+    #     r"""
+    #     Compute the group logarithm of point at base_point.
 
-        Parameters
-        ----------
-        point : array-like, shape=[..., n, n]
-            Rotation matrix.
-        base_point : array-like, shape=[..., n, n]
-            Rotation matrix.
-            Optional, defaults to identity if None.
+    #     Parameters
+    #     ----------
+    #     point : array-like, shape=[..., n, n]
+    #         Rotation matrix.
+    #     base_point : array-like, shape=[..., n, n]
+    #         Rotation matrix.
+    #         Optional, defaults to identity if None.
 
-        Returns
-        -------
-        tangent_vec : array-like, shape=[..., n, n]
-            Matrix such that `exp(tangent_vec, base_point) = point`.
+    #     Returns
+    #     -------
+    #     tangent_vec : array-like, shape=[..., n, n]
+    #         Matrix such that `exp(tangent_vec, base_point) = point`.
 
-        Notes
-        -----
-        Denoting `point` by :math:`g` and `base_point` by :math:`h`,
-        the output satisfies:
+    #     Notes
+    #     -----
+    #     Denoting `point` by :math:`g` and `base_point` by :math:`h`,
+    #     the output satisfies:
 
-        .. math::
+    #     .. math::
 
-            g = \exp(\log(g, h), h)
-        """
-        if base_point is None:
-            base_point = self.identity
-        if gs.any(self.are_antipodals(point, base_point)):
-            raise ValueError(
-                "The Group Logarithm is not well-defined for"
-                f" antipodal rotation matrices: {point} and"
-                f"{base_point}."
-            )
-        return super().log(point, base_point)
+    #         g = \exp(\log(g, h), h)
+    #     """
+    #     if base_point is None:
+    #         base_point = self.identity
+
+    #     if gs.any(self.are_antipodals(point, base_point)):
+    #         raise ValueError(
+    #             "The Group Logarithm is not well-defined for"
+    #             f" antipodal rotation matrices: {point} and"
+    #             f"{base_point}."
+    #         )
+    #     return super().log(point, base_point)
 
 
 class _SpecialOrthogonalVectors(LieGroup):

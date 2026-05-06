@@ -16,9 +16,13 @@ ATOL = 1e-6
 class MatrixLieGroup(Manifold, abc.ABC):
     """Class for matrix Lie groups."""
 
+    # TODO: review due to changes to exp
+
     def __init__(self, representation_dim, lie_algebra=None, **kwargs):
         super().__init__(shape=(representation_dim, representation_dim), **kwargs)
         self.lie_algebra = lie_algebra
+
+        # TODO: check need
         self.representation_dim = representation_dim
 
     @property
@@ -94,8 +98,10 @@ class MatrixLieGroup(Manifold, abc.ABC):
         """
         if inverse:
             point = self.inverse(point)
+
         if left:
             return lambda tangent_vec: self.compose(point, tangent_vec)
+
         return lambda tangent_vec: self.compose(tangent_vec, point)
 
     def lie_bracket(self, tangent_vec_a, tangent_vec_b, base_point=None):
@@ -119,6 +125,7 @@ class MatrixLieGroup(Manifold, abc.ABC):
         bracket : array-like, shape=[..., n, n]
             Lie bracket.
         """
+        # TODO: move to the Lie algebra?
         if base_point is None:
             base_point = self.identity
         inverse_base_point = self.inverse(base_point)
@@ -179,8 +186,7 @@ class MatrixLieGroup(Manifold, abc.ABC):
         regularized = self.lie_algebra.projection(tangent_vec_at_id)
         return self.compose(base_point, regularized)
 
-    @classmethod
-    def exp(cls, tangent_vec, base_point=None):
+    def exp(self, tangent_vec, base_point=None):
         r"""
         Exponentiate a left-invariant vector field from a base point.
 
@@ -208,14 +214,10 @@ class MatrixLieGroup(Manifold, abc.ABC):
         point : array-like, shape=[..., n, n]
             Left multiplication of ``exp(algebra_mat)`` with ``base_point``.
         """
-        expm = gs.linalg.expm
-        if base_point is None:
-            return expm(tangent_vec)
-        lie_algebra_vec = cls.compose(cls.inverse(base_point), tangent_vec)
-        return cls.compose(base_point, cls.exp(lie_algebra_vec))
+        # TODO: review docstrings
+        return gs.linalg.expm(tangent_vec)
 
-    @classmethod
-    def log(cls, point, base_point=None):
+    def log(self, point):
         r"""
         Compute a left-invariant vector field bringing base_point to point.
 
@@ -243,11 +245,8 @@ class MatrixLieGroup(Manifold, abc.ABC):
         .. math::
             g = \exp(\log(g, h), h)
         """
-        logm = gs.linalg.logm
-        if base_point is None:
-            return logm(point)
-        lie_algebra_vec = logm(cls.compose(cls.inverse(base_point), point))
-        return cls.compose(base_point, lie_algebra_vec)
+        # TODO: review docstrings; returns tangent vec at identity
+        return gs.linalg.logm(point)
 
 
 class LieGroup(Manifold, abc.ABC):
