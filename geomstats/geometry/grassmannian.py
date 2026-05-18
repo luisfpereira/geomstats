@@ -244,8 +244,12 @@ class Grassmannian(LevelSet):
 class GrassmannianCanonicalMetric(RiemannianMetric):
     """Canonical metric of the Grassmann manifold."""
 
+    # TODO: check if there is smoke data and start cleaning the implementation
+    # TODO: any advantage in explictly implementing other operations?
+
     def __init__(self, space):
         super().__init__(space=space, signature=(space.dim, 0, 0))
+        # TODO: remove dependency on the general linear
         self._general_linear = GeneralLinear(space.n, equip=False)
 
     def exp(self, tangent_vec, base_point):
@@ -265,10 +269,10 @@ class GrassmannianCanonicalMetric(RiemannianMetric):
         exp : array-like, shape=[..., n, n]
             Riemannian exponential.
         """
-        expm = gs.linalg.expm
-        mul = Matrices.mul
         rot = Matrices.bracket(base_point, -tangent_vec)
-        return mul(expm(rot), base_point, expm(-rot))
+        # e^{-A}=\left(e^A\right)^{\top}
+        exp_rot = gs.linalg.expm(rot)
+        return Matrices.mul(exp_rot, base_point, gs.transpose(exp_rot))
 
     def log(self, point, base_point):
         r"""Compute the Riemannian logarithm of point w.r.t. base_point.
@@ -605,6 +609,72 @@ class GrassmannianBundle(FiberBundle):
             Aligned point.
         """
         return Matrices.align_matrices(point, base_point, flip=False)
+
+
+class StiefelReprGrassmannianBundle(FiberBundle):
+    def vertical_projection(self, tangent_vec, base_point):
+        return Matrices.mul(base_point, gs.transpose(base_point), tangent_vec)
+
+    def align(self, point, base_point):
+        """Align point to base point.
+
+        Parameters
+        ----------
+        point : array-like, shape=[..., n, p]
+            Point to align.
+        base_point : array-like, shape=[..., n, p]
+            Base point.
+
+        Returns
+        -------
+        aligned_point : array-like, shape=[...,  n, p]
+            Aligned point.
+        """
+        return Matrices.align_matrices(point, base_point, flip=False)
+
+
+class StiefelReprGrassmannianCanonicalMetric(RiemannianMetric):
+    def exp(self, tangent_vec, base_point):
+        W, S, Vt = gs.linalg.svd(tangent_vec, full_matrices=False)
+        V = Matrices.transpose(Vt)
+
+        cos_S = gs.cos(S)[..., None, :]
+        sin_S = gs.sin(S)[..., None, :]
+        Y = (base_point @ V) * cos_S + W * sin_S
+        return Y @ Vt
+
+    def log(self, point, base_point):
+        aligned_point = Matrices.align_matrices(point, base_point, flip=False)
+        XtY = Matrices.transpose(base_point) @ aligned_point
+        hor_tangent_vec = aligned_point - base_point @ XtY
+
+        W, S, Vt = gs.linalg.svd(hor_tangent_vec, full_matrices=False)
+        S = gs.clip(S, -1.0, 1.0)
+
+        arcsinS = gs.arcsin(S)
+        return (W * arcsinS[..., None, :]) @ Vt
+
+    def inner_product(self, tangent_vec_a, tangent_vec_b, base_point):
+        r"""Compute the inner-product of two tangent vectors at a base point.
+
+        Parameters
+        ----------
+        tangent_vec_a : array-like, shape=[..., n, p]
+            First tangent vector at base point.
+        tangent_vec_b : array-like, shape=[..., n, p]
+            Second tangent vector at base point.
+        base_point : array-like, shape=[..., n, p]
+            Point in the Stiefel manifold.
+
+        Returns
+        -------
+        inner_prod : array-like, shape=[..., 1]
+            Inner-product of the two tangent vectors.
+        """
+        inner_prod = Matrices.frobenius_product(tangent_vec_a, tangent_vec_b)
+        return repeat_out(
+            self._space.point_ndim, inner_prod, tangent_vec_a, tangent_vec_b, base_point
+        )
 
 
 register_quotient(

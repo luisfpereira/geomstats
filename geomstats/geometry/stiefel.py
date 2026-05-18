@@ -267,14 +267,22 @@ class StiefelCanonicalMetric(RiemannianMetric):
             Point in the Stiefel manifold equal to the Riemannian exponential
             of tangent_vec at the base point.
         """
+        # edelman2008 corollary 2.2.
+        # zimmermann2017 2.
         p = self._space.p
+
+        # U: point, \Delta: tangent vector
+
+        # \Delta=U U^T \Delta+\left(I-U U^T\right) \Delta
         matrix_a = Matrices.mul(Matrices.transpose(base_point), tangent_vec)
         matrix_k = tangent_vec - Matrices.mul(base_point, matrix_a)
 
+        # qr of \left(I-U U^T\right) \Delta
         matrix_q, matrix_r = gs.linalg.qr(matrix_k)
 
         matrix_ar = gs.concatenate([matrix_a, -Matrices.transpose(matrix_r)], axis=-1)
 
+        # TODO: create block matrix function
         zeros = gs.zeros_like(tangent_vec)[..., :p, :p]
         matrix_rz = gs.concatenate([matrix_r, zeros], axis=-1)
         block = gs.concatenate([matrix_ar, matrix_rz], axis=-2)
