@@ -5,6 +5,7 @@ Lead author: Hadi Zaatiti.
 
 import logging
 
+import numpy as np
 from sklearn.base import BaseEstimator, ClusterMixin
 
 import geomstats.backend as gs
@@ -45,25 +46,63 @@ class RiemannianKMedoids(TransformerMixin, ClusterMixin, BaseEstimator):
     :mod:`examples.plot_kmedoids_manifolds`
     """
 
-    def __init__(self, space, n_clusters=8, init="random", max_iter=100, n_jobs=1):
+    # TODO: rename, this is not Riemannian
+    # TODO: remove `dist_pairwise` from metric
+    # TODO: implement example for Grassmanian
+
+    def __init__(
+        self,
+        space,
+        n_clusters=8,
+        method="alternate",  # "pam" | "alternate"
+        init="random",
+        max_iter=100,
+        n_jobs=1,
+        store_dist_mat=True,
+    ):
         self.space = space
         self.n_clusters = n_clusters
-        self.max_iter = max_iter
+        self.method = method
         self.init = init
+        self.store_dist_mat = store_dist_mat
+        self.max_iter = max_iter
         self.n_jobs = n_jobs
 
         self.cluster_centers_ = None
         self.labels_ = None
         self.medoid_indices_ = None
+        self.iter_ = None
+        # TODO: add flag for storing this?
+        if store_dist_mat:
+            self.dist_mat_ = None
 
-    def _initialize_medoids(self, distances):
+    def _initialize_medoids(self, dist_mat):
         """Select initial medoids when beginning clustering."""
         if self.init == "random":
-            medoids = gs.random.choice(gs.arange(len(distances)), self.n_clusters)
+            medoids = gs.random.choice(gs.arange(len(dist_mat)), self.n_clusters)
         else:
             logging.error("Unknown initialization method.")
 
         return medoids
+
+    def _assign_cluster(self, dist_mat, medoid_indices):
+        return gs.argmin(dist_mat[:, medoid_indices], axis=-1).T
+
+    def _costs(self, dist_mat, labels, medoid_indices):
+        indices = gs.arange(dist_mat.shape[0])
+
+        if labels.ndim == 2:
+            indices = indices[None, :]
+            assigned_medoids = medoid_indices[
+                gs.arange(medoid_indices.shape[0])[:, None], labels
+            ]
+        else:
+            assigned_medoids = medoid_indices[labels]
+
+        return dist_mat[indices, assigned_medoids]
+
+    def _cost(self, dist_mat, labels, medoid_indices):
+        return gs.sum(self._costs(dist_mat, labels, medoid_indices), axis=-1)
 
     def fit(self, X):
         """Provide cluster centers and data labels.
@@ -83,48 +122,102 @@ class RiemannianKMedoids(TransformerMixin, ClusterMixin, BaseEstimator):
         self : object
             Returns self.
         """
-        distances = self.space.metric.dist_pairwise(X, n_jobs=self.n_jobs)
-        medoids_indices = self._initialize_medoids(distances)
+        dist_mat = self.space.metric.dist_pairwise(X, n_jobs=self.n_jobs)
+        if self.store_dist_mat:
+            self.dist_mat_ = dist_mat
+
+        # TODO: add callable
+        medoid_indices = self._initialize_medoids(dist_mat)
 
         for iteration in range(self.max_iter):
-            old_medoids_indices = gs.copy(medoids_indices)
-            labels = gs.argmin(distances[medoids_indices, :], axis=0)
-            self._update_medoid_indexes(distances, labels, medoids_indices)
+            labels = self._assign_cluster(dist_mat, medoid_indices)
 
-            if gs.all(old_medoids_indices == medoids_indices):
-                break
-            if iteration == self.max_iter - 1:
-                logging.warning(
-                    "Maximum number of iteration reached before "
-                    "convergence. Consider increasing max_iter to "
-                    "improve the fit."
+            if self.method == "alternate":
+                new_medoid_indices = self._alternate_update(
+                    dist_mat, labels, medoid_indices
+                )
+            else:  # TODO: do validation at init?
+                # TODO: use labels?
+                new_medoid_indices, _ = self._pam_update(
+                    dist_mat,
+                    labels,
+                    medoid_indices,
                 )
 
-        self.cluster_centers_ = X[medoids_indices]
+            if gs.all(new_medoid_indices == medoid_indices):
+                break
+
+            medoid_indices = new_medoid_indices
+
+        else:
+            medoid_indices = new_medoid_indices
+            labels = self._assign_cluster(dist_mat, medoid_indices)
+            logging.warning(
+                "Maximum number of iteration reached before "
+                "convergence. Consider increasing max_iter to "
+                "improve the fit."
+            )
+
+        self.cluster_centers_ = X[medoid_indices]
         self.labels_ = labels
-        self.medoid_indices_ = medoids_indices
+        self.medoid_indices_ = medoid_indices
+        self.iter_ = iteration
 
         return self
 
-    def _update_medoid_indexes(self, distances, labels, medoid_indices):
-        for cluster in range(self.n_clusters):
-            cluster_index = gs.where(labels == cluster)[0]
-            if len(cluster_index) == 0:
+    def _alternate_update(self, dist_mat, labels, medoid_indices):
+        medoid_indices = gs.copy(medoid_indices)
+        for cluster_label in range(self.n_clusters):
+            cluster_points = gs.where(labels == cluster_label)[0]
+
+            if len(cluster_points) == 0:
                 logging.warning("One cluster is empty.")
                 continue
 
-            in_cluster_distances = distances[
-                cluster_index, gs.expand_dims(cluster_index, axis=-1)
-            ]
+            in_cluster_distances = dist_mat[cluster_points, cluster_points[..., None]]
             in_cluster_all_costs = gs.sum(in_cluster_distances, axis=1)
+
             min_cost_index = gs.argmin(in_cluster_all_costs)
             min_cost = in_cluster_all_costs[min_cost_index]
-            current_cost = in_cluster_all_costs[
-                gs.argmax(cluster_index == medoid_indices[cluster])
-            ]
+
+            current_medoid_index = gs.where(
+                cluster_points == medoid_indices[cluster_label]
+            )[0][0]
+            current_cost = in_cluster_all_costs[current_medoid_index]
 
             if min_cost < current_cost:
-                medoid_indices[cluster] = cluster_index[min_cost_index]
+                medoid_indices[cluster_label] = cluster_points[min_cost_index]
+
+        return medoid_indices
+
+    def _pam_update(self, dist_mat, labels, medoid_indices):
+        current_cost = self._cost(dist_mat, labels, medoid_indices)
+
+        n_points = dist_mat.shape[0]
+        non_medoids = np.setdiff1d(gs.arange(n_points), medoid_indices)
+
+        candidate_medoid_indices = []
+        for medoid_pos, medoid in enumerate(medoid_indices):
+            for candidate in non_medoids:
+                new_medoid_indices = gs.copy(medoid_indices)
+                new_medoid_indices[medoid_pos] = candidate
+                candidate_medoid_indices.append(new_medoid_indices)
+
+        candidate_medoid_indices = gs.array(candidate_medoid_indices)
+
+        candidate_labels = self._assign_cluster(dist_mat, candidate_medoid_indices)
+        candidate_costs = gs.sum(
+            self._costs(dist_mat, candidate_labels, candidate_medoid_indices),
+            axis=-1,
+        )
+
+        best_index = gs.argmin(candidate_costs)
+        best_cost = candidate_costs[best_index]
+
+        if best_cost < current_cost:
+            return candidate_medoid_indices[best_index], candidate_labels[best_index]
+
+        return medoid_indices, labels
 
     def predict(self, X):
         """Predict the closest cluster for each sample in X.
@@ -142,6 +235,7 @@ class RiemannianKMedoids(TransformerMixin, ClusterMixin, BaseEstimator):
         """
         labels = gs.zeros(len(X))
 
+        # TODO: this can be done way better
         for point_index, point_value in enumerate(X):
             distances = gs.zeros(len(self.cluster_centers_))
             for cluster_index, cluster_value in enumerate(self.cluster_centers_):
