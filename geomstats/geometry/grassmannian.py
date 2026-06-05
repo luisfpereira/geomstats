@@ -676,6 +676,35 @@ class StiefelReprGrassmannianCanonicalMetric(RiemannianMetric):
             self._space.point_ndim, inner_prod, tangent_vec_a, tangent_vec_b, base_point
         )
 
+    def injectivity_radius(self, base_point=None):
+        """Compute the radius of the injectivity domain.
+
+        This is is the supremum of radii r for which the exponential map is a
+        diffeomorphism from the open ball of radius r centered at the base
+        point onto its image.
+        In this case it is Pi / 2 everywhere.
+
+        Parameters
+        ----------
+        base_point : array-like, shape=[..., n, n]
+            Point on the manifold.
+
+        Returns
+        -------
+        radius : array-like, shape=[...,]
+            Injectivity radius.
+
+        References
+        ----------
+        .. [BZA2020]  Bendokat, Thomas, Ralf Zimmermann, and P.-A. Absil.
+            “A Grassmann Manifold Handbook: Basic Geometry and
+            Computational Aspects.”
+            ArXiv:2011.13699 [Cs, Math], November 27, 2020.
+            https://arxiv.org/abs/2011.13699.
+        """
+        radius = gs.array(gs.pi / 2)
+        return repeat_out(self._space.point_ndim, radius, base_point)
+
 
 register_quotient(
     Space=Stiefel,
