@@ -14,8 +14,8 @@ import geomstats.errors as error
 from geomstats.geometry.discrete_curves import ElasticMetric, SRVMetric
 from geomstats.geometry.euclidean import EuclideanMetric
 from geomstats.geometry.hypersphere import HypersphereMetric
-from geomstats.metric_geometry.bhv_space import BHVMetric
 from geomstats.metric_geometry.graph_space import GraphSpace
+from geomstats.metric_geometry.point_set import PointSetMetric
 
 ELASTIC_METRICS = (SRVMetric, ElasticMetric)
 
@@ -28,8 +28,8 @@ def _is_elastic_metric(metric):
     return isinstance(metric, tuple(ELASTIC_METRICS))
 
 
-def _is_bhv_metric(metric):
-    return isinstance(metric, BHVMetric)
+def _is_geodesic_metric(metric):
+    return isinstance(metric, PointSetMetric)
 
 
 def _is_graph_space(space):
@@ -851,8 +851,8 @@ class AACFrechetMean(BaseEstimator):
         self.init_point = init_point
         self.save_last_X = save_last_X
 
-        self.total_space_estimator_kwargs = total_space_estimator_kwargs or {}
-        self.total_space_estimator_kwargs["method"] = "total_space"
+        self.total_space_estimator_kwargs = {"method": "linear"}
+        self.total_space_estimator_kwargs.update(total_space_estimator_kwargs or {})
         self.total_space_estimator = FrechetMean(
             self.space, **self.total_space_estimator_kwargs
         )
@@ -1021,28 +1021,39 @@ def FrechetMean(space, **kwargs):
 
     Interface for instantiating proper algorithm.
     """
-    # Handling nested estimator structure for AAC
-    if kwargs.get("method") == "total_space":
+    method = kwargs.get("method", "auto")
+
+    Estimator = GeneralFrechetMean
+    if method == "auto":
         kwargs.pop("method", None)
+        if _is_graph_space(space):
+            method = AACFrechetMean
 
-    elif (kwargs.get("method") == "aac") or _is_graph_space(space):
+        elif _is_geodesic_metric(space.metric):
+            Estimator = SturmsMean
+
+        elif isinstance(space.metric, HypersphereMetric) and space.dim == 1:
+            Estimator = CircleMean
+
+        elif _is_linear_metric(space.metric):
+            Estimator = LinearMean
+
+        elif _is_elastic_metric(space.metric):
+            Estimator = ElasticMean
+
+    elif method == "aac":
+        if not hasattr(space, "aligner"):
+            raise ValueError("AAC requires aligner.")
+
         kwargs.pop("method", None)
-        return AACFrechetMean(space, **kwargs)
+        Estimator = AACFrechetMean
 
-    if isinstance(space.metric, HypersphereMetric) and space.dim == 1:
-        Estimator = CircleMean
-
-    elif _is_linear_metric(space.metric):
-        Estimator = LinearMean
-
-    elif _is_elastic_metric(space.metric):
-        Estimator = ElasticMean
-
-    elif kwargs.get("method") == "sturms" or _is_bhv_metric(space.metric):
+    elif method == "sturms":
         kwargs.pop("method", None)
         Estimator = SturmsMean
 
-    else:
-        Estimator = GeneralFrechetMean
+    elif method == "linear":
+        kwargs.pop("method", None)
+        Estimator = LinearMean
 
     return Estimator(space, **kwargs)
