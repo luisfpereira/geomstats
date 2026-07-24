@@ -11,24 +11,15 @@ from sklearn.base import BaseEstimator
 
 import geomstats.backend as gs
 import geomstats.errors as error
-from geomstats.geometry.discrete_curves import ElasticMetric, SRVMetric
-from geomstats.geometry.euclidean import EuclideanMetric
 from geomstats.geometry.hypersphere import HypersphereMetric
-from geomstats.metric_geometry.bhv_space import BHVMetric
 
-ELASTIC_METRICS = (SRVMetric, ElasticMetric)
-
-
-def _is_linear_metric(metric):
-    return isinstance(metric, EuclideanMetric)
-
-
-def _is_elastic_metric(metric):
-    return isinstance(metric, tuple(ELASTIC_METRICS))
-
-
-def _is_bhv_metric(metric):
-    return isinstance(metric, BHVMetric)
+from ._utils import (
+    _is_elastic_metric,
+    _is_geodesic_metric,
+    _is_graph_space,
+    _is_linear_metric,
+    _warn_max_iterations,
+)
 
 
 def _scalarmul(scalar, array):
@@ -103,8 +94,7 @@ def linear_mean(points, weights=None):
 
     weighted_points = _scalarmul(weights, points)
 
-    mean = gs.sum(weighted_points, axis=0) / sum_weights
-    return mean
+    return gs.sum(weighted_points, axis=0) / sum_weights
 
 
 class BaseGradientDescent(abc.ABC):
@@ -199,10 +189,7 @@ class GradientDescent(BaseGradientDescent):
                 step_size = step_size / 2.0
 
         if iteration == self.max_iter:
-            logging.warning(
-                "Maximum number of iterations %d reached. The mean may be inaccurate",
-                self.max_iter,
-            )
+            _warn_max_iterations(iteration, self.max_iter)
 
         if self.verbose:
             logging.info(
@@ -258,10 +245,7 @@ class BatchGradientDescent(BaseGradientDescent):
                 step_size = step_size / 2.0
 
         if iteration == self.max_iter:
-            logging.warning(
-                "Maximum number of iterations %d reached. The mean may be inaccurate",
-                self.max_iter,
-            )
+            _warn_max_iterations(iteration, self.max_iter)
 
         if self.verbose:
             logging.info(
@@ -778,6 +762,122 @@ class SturmsMean(BaseEstimator):
         return self
 
 
+class AACFrechetMean(BaseEstimator):
+    r"""Class AAC for Frechet Mean on Graph Space.
+
+    The Align All and Compute (AAC) algorithm for Frechet Mean (FM)estimation is
+    introduced in [CFV2020]_ and it estimates the Frechet Mean for a set of
+    labeled or unlabeled graphs. The idea is to optimally aligned the graphs to the
+    current mean estimator using the optimal alignment between the graphs and the mean
+    (graph matching between two graphs) and compute the mean estimation between the
+    aligned adjacency matrices (the arithmetic mean in the euclidean space of dimension
+    :math:`nodes \times nodes`). The algorithm stops as soon as the distance between two
+    consecutive estimations is lower then :math:`\epsilon` or the maximum number of
+    iterations is reached. The initialization step consists in aligning the data
+    with respect to an initial point.
+
+    Parameters
+    ----------
+    space : GraphSpace
+        Graph space total space with a quotient structure.
+    epsilon: float, default=1e-6
+        Stopping criterion for the estimation step, i.e., the distance between two
+        consecutive estimators.
+    max_iter: int, default = 20
+        Stopping criterion on the maximum number of iterations.
+    init_point: array-like, shape=[n_nodes, n_nodes] or GraphPoint, default random.
+        Algorithm initialization.
+    save_last_X: bool, default = True
+        Flag to save the data as aligned in the last algorithm iteration.
+    total_space_estimator_kwargs : dict
+        Total space estimator keyword arguments.
+
+    Attributes
+    ----------
+    total_space_estimator : BaseEstimator
+        Frechet mean estimator in total space.
+    estimate_ : array-like, mean=[n_nodes, n_nodes]
+        Mean.
+    n_iter_ : int
+        Number of performed iterations.
+    aligned_X_: array-like, shape=[n_samples, n_nodes, n_nodes] or set of GraphPoint.
+        Set of aligned data as after the last call of fit.
+        Saved if ``save_last_X is True``.
+
+    References
+    ----------
+    .. [CFV2020]  Calissano, A., Feragen, A., Vantini, S.
+        “Graph Space: Geodesic Principal Components for a Population of
+        Network-valued Data.” Mox report 14, 2020.
+        https://mox.polimi.it/reports-and-theses/publication-results/?id=855.
+    """
+
+    def __init__(
+        self,
+        space,
+        *,
+        epsilon=1e-3,
+        max_iter=20,
+        init_point=None,
+        total_space_estimator_kwargs=None,
+        save_last_X=True,
+    ):
+        self.space = space
+        self.epsilon = epsilon
+        self.max_iter = max_iter
+        self.init_point = init_point
+        self.save_last_X = save_last_X
+
+        self.total_space_estimator_kwargs = {"method": "linear"}
+        self.total_space_estimator_kwargs.update(total_space_estimator_kwargs or {})
+        self.total_space_estimator = FrechetMean(
+            self.space, **self.total_space_estimator_kwargs
+        )
+
+        self.estimate_ = None
+        self.n_iter_ = None
+        self.aligned_X_ = None
+
+    def fit(self, X, y=None):
+        """Fit the Frechet Mean.
+
+        Parameters
+        ----------
+        X : array-like, shape=[n_samples, n_nodes, n_nodes].
+            Dataset to estimate the FM.
+        y : Ignored
+            Ignored.
+
+        Returns
+        -------
+        self : object
+            Returns self.
+        """
+        previous_estimate = (
+            gs.random.choice(X) if self.init_point is None else self.init_point
+        )
+        aligned_X = X
+
+        for iteration in range(self.max_iter):
+            aligned_X = self.space.aligner.align(aligned_X, previous_estimate)
+            new_estimate = self.total_space_estimator.fit(aligned_X).estimate_
+
+            error = self.space.metric.dist(previous_estimate, new_estimate)
+            if error < self.epsilon:
+                break
+
+            previous_estimate = new_estimate
+        else:
+            _warn_max_iterations(iteration, self.max_iter)
+
+        if self.save_last_X:
+            self.aligned_X_ = aligned_X
+        self.estimate_ = new_estimate
+        self.n_iter_ = iteration
+
+        return self
+
+
 class _BaseMeanEstimator(BaseEstimator, abc.ABC):
     """Base class for mean estimators on manifolds.
 
@@ -898,20 +998,39 @@ def FrechetMean(space, **kwargs):
 
     Interface for instantiating proper algorithm.
     """
-    if isinstance(space.metric, HypersphereMetric) and space.dim == 1:
-        Estimator = CircleMean
+    method = kwargs.get("method", "auto")
 
-    elif _is_linear_metric(space.metric):
-        Estimator = LinearMean
+    Estimator = GeneralFrechetMean
+    if method == "auto":
+        kwargs.pop("method", None)
+        if _is_graph_space(space):
+            method = AACFrechetMean
 
-    elif _is_elastic_metric(space.metric):
-        Estimator = ElasticMean
+        elif _is_geodesic_metric(space.metric):
+            Estimator = SturmsMean
 
-    elif kwargs.get("method") == "sturms" or _is_bhv_metric(space.metric):
+        elif isinstance(space.metric, HypersphereMetric) and space.dim == 1:
+            Estimator = CircleMean
+
+        elif _is_linear_metric(space.metric):
+            Estimator = LinearMean
+
+        elif _is_elastic_metric(space.metric):
+            Estimator = ElasticMean
+
+    elif method == "aac":
+        if not hasattr(space, "aligner"):
+            raise ValueError("AAC requires aligner.")
+
+        kwargs.pop("method", None)
+        Estimator = AACFrechetMean
+
+    elif method == "sturms":
         kwargs.pop("method", None)
         Estimator = SturmsMean
 
-    else:
-        Estimator = GeneralFrechetMean
+    elif method == "linear":
+        kwargs.pop("method", None)
+        Estimator = LinearMean
 
     return Estimator(space, **kwargs)

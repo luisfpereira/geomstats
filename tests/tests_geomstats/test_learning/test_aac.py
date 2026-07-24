@@ -3,13 +3,12 @@ import random
 import pytest
 
 import geomstats.backend as gs
-from geomstats.learning.aac import _AACGGPCA, AAC, _AACFrechetMean, _AACRegression
+from geomstats.learning.aac import AACGGPCA, AACFrechetMean, AACRegression
 from geomstats.metric_geometry.graph_space import (
     GraphSpace,
     _GeodesicToPointAligner,
 )
-from geomstats.test.parametrizers import DataBasedParametrizer, Parametrizer
-from geomstats.test.test_case import TestCase
+from geomstats.test.parametrizers import DataBasedParametrizer
 from geomstats.test_cases.learning._base import (
     BaseEstimatorTestCase,
     MeanEstimatorMixinsTestCase,
@@ -20,21 +19,7 @@ from .data.aac import (
     AACFrechetMeanTestData,
     AACGGPCATestData,
     AACRegressionTestData,
-    AACTestData,
 )
-
-
-@pytest.mark.smoke
-class TestAAC(TestCase, metaclass=Parametrizer):
-    total_space = GraphSpace(2, equip=True)
-    total_space.equip_with_group_action()
-    total_space.equip_with_quotient()
-
-    testing_data = AACTestData()
-
-    def test_init(self, estimate, expected_type):
-        estimator = AAC(self.total_space, estimate=estimate)
-        self.assertTrue(type(estimator) is expected_type)
 
 
 class TestAACFrechetMean(
@@ -46,7 +31,7 @@ class TestAACFrechetMean(
     _space.equip_with_quotient()
     _space.aligner.set_alignment_algorithm("exhaustive")
 
-    estimator = _AACFrechetMean(_space, init_point=gs.zeros((_n, _n)))
+    estimator = AACFrechetMean(_space, init_point=gs.zeros((_n, _n)))
 
     testing_data = AACFrechetMeanTestData()
 
@@ -67,7 +52,7 @@ class TestAACGGPCA(BaseEstimatorTestCase, metaclass=DataBasedParametrizer):
         _GeodesicToPointAligner(_total_space)
     )
 
-    estimator = _AACGGPCA(_total_space, init_point=gs.zeros((_n, _n)), epsilon=1e-6)
+    estimator = AACGGPCA(_total_space, init_point=gs.zeros((_n, _n)), epsilon=1e-6)
 
     testing_data = AACGGPCATestData()
 
@@ -101,7 +86,7 @@ class TestAACRegression(BaseEstimatorTestCase, metaclass=DataBasedParametrizer):
     _space.equip_with_quotient()
     _space.aligner.set_alignment_algorithm("exhaustive")
 
-    estimator = _AACRegression(_space, init_point=gs.zeros((_n, _n)))
+    estimator = AACRegression(_space, init_point=gs.zeros((_n, _n)))
     testing_data = AACRegressionTestData()
 
     @pytest.mark.random
