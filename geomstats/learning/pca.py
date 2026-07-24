@@ -4,9 +4,11 @@ Lead author: Nina Miolane.
 """
 
 import numbers
+import random
 from math import log
 
 from scipy.special import gammaln
+from sklearn.base import BaseEstimator
 from sklearn.decomposition._base import _BasePCA
 from sklearn.utils.extmath import stable_cumsum, svd_flip
 
@@ -15,8 +17,11 @@ from geomstats.geometry._hyperbolic import _Hyperbolic
 from geomstats.geometry.hyperbolic import Hyperbolic
 from geomstats.geometry.matrices import Matrices
 from geomstats.geometry.symmetric_matrices import SymmetricMatrices
+from geomstats.learning._sklearn import PCA
 from geomstats.learning.exponential_barycenter import ExponentialBarycenter
 from geomstats.learning.frechet_mean import FrechetMean
+
+from ._utils import _is_graph_space, _warn_max_iterations
 
 
 def _assess_dimension_(spectrum, rank, n_samples, n_features):
@@ -493,22 +498,176 @@ class HyperbolicPlaneExactPGA(_BasePCA):
         )
 
 
-class ExactPGA:
-    r"""Exact Principal Geodesic Analysis.
+def PGA(space, **kwargs):
+    r"""Principal Geodesic Analysis.
 
     Parameters
     ----------
     space : Manifold
         Equipped manifold.
     """
+    if isinstance(space, _Hyperbolic) and space.dim == 2:
+        return HyperbolicPlaneExactPGA(space, **kwargs)
 
-    def __new__(cls, space, **kwargs):
-        """Interface for instantiating proper algorithm."""
-        if isinstance(space, _Hyperbolic) and space.dim == 2:
-            return HyperbolicPlaneExactPGA(space, **kwargs)
+    raise NotImplementedError(
+        "PGA is only implemented for the two-dimensional hyperbolic space."
+    )
 
-        else:
-            raise NotImplementedError(
-                "Exact PGA is only implemented for the two-dimensional "
-                "hyperbolic space."
+
+class AACGGPCA(BaseEstimator):
+    r"""Generalized Geodesic Principal Components (GGPCA) on Graph Space.
+
+    The Align All and Compute (AAC) algorithm for GGPCA estimation is
+    introduced in [CFV2020]_ and it estimates the GGPCA for a set of
+    labeled or unlabeled graphs. The idea is to optimally aligned the graphs to the
+    current GGPCA estimator using the optimal alignment between the graphs and the
+    geodesics and then compute the GGPCA estimation between the aligned adjacency
+    matrices (the PCA in the euclidean space of dimension :math:`nodes \times nodes`).
+    The algorithm stops as soon as the percentage of variance explained by PCA in two
+    consecutive estimations is lower then :math:`\epsilon` or the maximum number of
+    iteration is reached. The initialization step consists in aligning all the data with
+    respect to an initial point.
+
+    Parameters
+    ----------
+    space : GraphSpace
+        Graph space total space with a quotient structure.
+    epsilon: float, default=1e-6
+        Stopping criterion for the estimation step, i.e., the distance between two
+        consecutive estimators.
+    max_iter: int, default = 20
+        Stopping criterion on the maximum number of iterations.
+    init_point: array-like, shape=[n_nodes, n_nodes] or GraphPoint, default random.
+        Algorithm initialization.
+    n_components: int
+        Number of principal components to be estimated. Notice that the convergence is
+        ensured only for the first principal component.
+    save_last_X: bool, default = True
+        Flag to save the data as aligned in the last algorithm iteration.
+
+    Attributes
+    ----------
+    total_space_estimator: BaseEstimator
+        Method for the estimation of the PCA for a set of flattened adjacency matrices
+        in the total space. Check geomstats.learning._sklearn_wrapper for details.
+        Default: ``sklearn.decomposition.PCA``.
+    n_iter_ : int
+        Number of performed iterations.
+    aligned_X_: array-like, shape=[n_samples, n_nodes, n_nodes] or set of GraphPoint.
+        Set of aligned data as after the last call of fit.
+        Saved if ``save_last_X is True``.
+
+    References
+    ----------
+    .. [CFV2020]  Calissano, A., Feragen, A., Vantini, S.
+        “Graph Space: Geodesic Principal Components for a Population of
+        Network-valued Data.” Mox report 14, 2020.
+        https://mox.polimi.it/reports-and-theses/publication-results/?id=855.
+    """
+
+    def __init__(
+        self,
+        space,
+        *,
+        n_components=2,
+        epsilon=1e-3,
+        max_iter=20,
+        init_point=None,
+        save_last_X=True,
+    ):
+        self.space = space
+        self.epsilon = epsilon
+        self.max_iter = max_iter
+        self.init_point = init_point
+        self.n_components = n_components
+        self.save_last_X = save_last_X
+
+        self.total_space_estimator = PCA(n_components=self.n_components)
+        self.n_iter_ = None
+        self.aligned_X_ = None
+
+    @property
+    def components_(self):
+        """Principal Components in the total space.
+
+        GGPCA expressed as vectors in the total space.
+        """
+        return self.total_space_estimator.reshaped_components_
+
+    @property
+    def explained_variance_(self):
+        """Variance Explained along the GGPCA."""
+        return self.total_space_estimator.explained_variance_
+
+    @property
+    def explained_variance_ratio_(self):
+        """Percentage of Variance Explained along the GGPCA."""
+        return self.total_space_estimator.explained_variance_ratio_
+
+    @property
+    def mean_(self):
+        """Mean at the last iteration."""
+        return self.total_space_estimator.reshaped_mean_
+
+    def fit(self, X, y=None):
+        """Fit the GGPCA.
+
+        Parameters
+        ----------
+        X : array-like, shape=[n_samples, n_nodes, n_nodes] or set of GraphPoint.
+            Dataset to estimate the GGPCA.
+        y : Ignored
+            Ignored.
+
+        Returns
+        -------
+        self : object
+            Returns self.
+
+        Note: Default method in the total space is sklearn.decomposition.PCA where
+        the input data are centered but not scaled for each feature.
+        """
+        x = random.choice(X) if self.init_point is None else self.init_point
+        aligned_X = self.space.aligner.align(X, x)
+
+        self.total_space_estimator.fit(aligned_X)
+        previous_expl = self.total_space_estimator.explained_variance_ratio_[0]
+
+        for iteration in range(self.max_iter):
+            mean = self.total_space_estimator.reshaped_mean_
+            direc = self.total_space_estimator.reshaped_components_[0]
+
+            geodesic = self.space.metric.geodesic(
+                initial_point=mean, initial_tangent_vec=direc
             )
+
+            aligned_X = self.space.aligner.align_point_to_geodesic(geodesic, aligned_X)
+            self.total_space_estimator.fit(aligned_X)
+            expl_ = self.total_space_estimator.explained_variance_ratio_[0]
+
+            error = gs.abs(expl_ - previous_expl)
+            if error < self.epsilon:
+                break
+            previous_expl = expl_
+        else:
+            _warn_max_iterations(iteration, self.max_iter)
+
+        if self.save_last_X:
+            self.aligned_X_ = aligned_X
+        self.n_iter_ = iteration
+
+        return self
+
+
+def GGPCA(space, **kwargs):
+    r"""Generalized Geodesic Principal Components.
+
+    Parameters
+    ----------
+    space : Manifold
+        Equipped manifold.
+    """
+    if _is_graph_space(space):
+        return AACGGPCA(space, **kwargs)
+
+    raise NotImplementedError("GGPCA is only implemented for graphspace.")

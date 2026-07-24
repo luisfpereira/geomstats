@@ -4,13 +4,13 @@ import matplotlib.pyplot as plt
 
 import geomstats.backend as gs
 from geomstats.geometry.hyperbolic import Hyperbolic
-from geomstats.learning.pca import ExactPGA
+from geomstats.learning.pca import PGA
 
 
 def plot_principal_geodesics(points, coords_type):
     """Compute and plot principal geodesics."""
     space = Hyperbolic(2, coords_type)
-    pca = ExactPGA(space)
+    pca = PGA(space)
     pca.fit(points)
     vec_1, vec_2 = pca.components_
     mean = pca.mean_
