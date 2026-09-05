@@ -21,26 +21,23 @@ References
 """
 
 import abc
-import logging
 
 import geomstats.backend as gs
 from geomstats._mesh import Surface
 
-from ._device import gpu_is_available, to_cpu, to_device
+from ._device import resolve_device, to_cpu
+from ._engine import resolve_engine
+from .base import DiscreteMeasure
 from .kernel import GaussianBinetPairing
 
 
 class KernelInducedMetric(abc.ABC):
     """Metric induced by a kernel pairing.
 
-    This class represents metrics defined through a bilinear pairing
-    induced by a kernel.
-
     Parameters
     ----------
     pairing : Pairing
-        Object implementing the kernel pairing. It must provide methods
-        to evaluate the kernel and associated reductions.
+        Kernel pairing used to define the metric.
     """
 
     def __init__(self, pairing):
@@ -48,21 +45,22 @@ class KernelInducedMetric(abc.ABC):
 
     @abc.abstractmethod
     def transform(self, point):
-        """Extract geometric features used by the representation."""
+        """Transform a point into the representation used by the pairing."""
 
     def scalar_product(self, point_a, point_b):
-        """Scalar product.
+        """Compute the scalar product between two points.
 
         Parameters
         ----------
-        point_a : Surface
-            A point.
-        point_b : Surface
-            A point.
+        point_a : object
+            First point.
+        point_b : object
+            Second point.
 
         Returns
         -------
         scalar : float
+            Scalar product between the points.
         """
         point_a = self.transform(point_a)
         point_b = self.transform(point_b)
@@ -70,18 +68,19 @@ class KernelInducedMetric(abc.ABC):
         return to_cpu(self.pairing(point_a, point_b))
 
     def squared_dist(self, point_a, point_b):
-        """Squared distance.
+        """Compute the squared distance between two points.
 
         Parameters
         ----------
-        point_a : Surface
-            A point.
-        point_b : Surface
-            A point.
+        point_a : object
+            First point.
+        point_b : object
+            Second point.
 
         Returns
         -------
-        scalar : float
+        squared_dist : float
+            Squared distance between the points.
         """
         point_a = self.transform(point_a)
         point_b = self.transform(point_b)
@@ -94,38 +93,39 @@ class KernelInducedMetric(abc.ABC):
         return to_cpu(sdist)
 
     def dist(self, point_a, point_b):
-        """Squared distance.
+        """Compute the distance between two points.
 
         Parameters
         ----------
-        point_a : Surface
-            A point.
-        point_b : Surface
-            A point.
+        point_a : object
+            First point.
+        point_b : object
+            Second point.
 
         Returns
         -------
-        scalar : float
+        dist : float
+            Distance between the points.
         """
         sq_dist = self.squared_dist(point_a, point_b)
         return gs.sqrt(sq_dist)
 
     def loss(self, target_point, target_faces=None):
-        """Loss with respected to target point.
+        """Create a squared-distance loss to a target point.
 
         Parameters
         ----------
-        point_a : Surface
-            A point.
-        target_faces : array-like, shape=[n_faces, 3]
-            Combinatorial structure of target mesh.
+        target_point : Surface
+            Target surface.
+        target_faces : array-like, shape=[n_faces, 3], optional
+            Combinatorial structure of the surface being optimized.
+            If omitted, use ``target_point.faces``.
 
         Returns
         -------
         squared_dist : callable
-            ``f(vertices) -> scalar``. Measures squared varifold distance
-            between a point with ``vertices`` given wrt ``target_faces``
-            against ``target_point``.
+            Function mapping surface vertices to their squared distance
+            from ``target_point``.
         """
         if target_faces is None:
             target_faces = target_point.faces
@@ -145,6 +145,38 @@ class KernelInducedMetric(abc.ABC):
         return squared_dist
 
 
+class SurfaceMeasure(DiscreteMeasure):
+    """Discrete measure representation of a surface.
+
+    Parameters
+    ----------
+    centroids : array-like
+        Face centroids.
+    normals : array-like
+        Face normals.
+    areas : array-like
+        Face areas.
+    """
+
+    def __init__(self, centroids, normals, areas):
+        super().__init__(centroids, normals, areas)
+
+    @property
+    def centroids(self):
+        """Face centroids."""
+        return self.points
+
+    @property
+    def normals(self):
+        """Face normals."""
+        return self.features
+
+    @property
+    def areas(self):
+        """Face areas."""
+        return self.weights
+
+
 class VarifoldMetric(KernelInducedMetric):
     """Varifold metric.
 
@@ -152,32 +184,26 @@ class VarifoldMetric(KernelInducedMetric):
     ----------
     sigma : float
         Positive bandwidth parameter of the Gaussian kernel.
-    backend : {"auto", "torch", "keops", "keops_genred", "keops_lazy"}
-        Implementation backend. Suffix with '_gpu' to control device.
-
-        - "auto": Select an implementation automatically (prefers
-          a KeOps-based implementation when available, otherwise falls back
-          to a Torch/NumPy implementation).
-        - "backend": Dense implementation using the current geomstats backend.
-        - "keops": Alias for "keops_genred".
-        - "keops_genred": KeOps implementation using Genred reductions.
-        - "keops_lazy": KeOps LazyTensor-based implementation.
+    engine : {"auto", "geomstats", "keops", "keops_genred", "keops_lazy"}
+        Kernel computation engine. ``"auto"`` selects an engine automatically
+        and ``"keops"`` is an alias for ``"keops_genred"``.
+    device : {"auto", "cpu", "gpu"} or None
+        Device for kernel computations. ``"auto"`` selects GPU when available
+        and CPU otherwise. If ``None``, no device is selected.
     """
 
-    def __init__(self, sigma, backend="auto"):
+    def __init__(self, sigma, engine="auto", device="auto"):
         self.sigma = sigma
-        pairing = GaussianBinetPairing(sigma, backend=backend)
+
+        self._engine = resolve_engine(engine)
+
+        pairing = GaussianBinetPairing(sigma, engine=self._engine)
         super().__init__(pairing)
 
-        self._gpu = False
-        if gpu_is_available() and (backend == "auto" or backend.endswith("_gpu")):
-            self._gpu = True
-
-        if backend.endswith("_gpu") and not gpu_is_available():
-            logging.info("No GPU available, computing on CPU.")
+        self._device = resolve_device(device)
 
     def transform(self, point):
-        """Extract geometric features used by the varifold representation.
+        """Convert a surface to its discrete measure representation.
 
         Parameters
         ----------
@@ -187,16 +213,11 @@ class VarifoldMetric(KernelInducedMetric):
 
         Returns
         -------
-        tuple
-            Tuple ``(centroids, normals, areas)`` used in the kernel pairing.
+        measure : SurfaceMeasure
+            Discrete surface measure on the configured device.
         """
-        arrays = (
+        return SurfaceMeasure(
             point.face_centroids,
             point.face_normals,
             point.face_areas,
-        )
-
-        if not self._gpu:
-            return arrays
-
-        return [to_device(array) for array in arrays]
+        ).to_device(self._device)

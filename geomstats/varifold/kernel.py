@@ -1,7 +1,5 @@
 """Kernel pairings."""
 
-import importlib
-
 import geomstats.backend as gs
 
 from .base import Pairing
@@ -17,73 +15,57 @@ else:
         return fn
 
 
-def GaussianBinetPairing(sigma, backend="auto"):
+def GaussianBinetPairing(sigma, engine):
     r"""Instantiate a Gaussian-Binet kernel pairing.
 
-    This pairing is defined by
+    The kernel is defined by
 
     .. math::
 
-        K(x, y, u, v) = exp(-||x - y||^2 / sigma^2) * <u, v>^2
-
+        K(x, y, u, v)
+        = \exp(-\|x - y\|^2 / \sigma^2) \langle u, v \rangle^2.
 
     Parameters
     ----------
     sigma : float
         Positive bandwidth parameter of the Gaussian kernel.
-    backend : {"auto", "torch", "keops", "keops_genred", "keops_lazy"}
-        Implementation backend.
+    engine : {"geomstats", "keops_genred", "keops_lazy"}
+        Kernel computation engine.
 
-        - "auto": Select an implementation automatically (typically prefers
-          a KeOps-based implementation when available, otherwise falls back
-          to a Torch/NumPy implementation).
-        - "backend": Dense implementation using the current geomstats backend.
-        - "keops": Alias for "keops_genred".
-        - "keops_genred": KeOps implementation using Genred reductions.
-        - "keops_lazy": KeOps LazyTensor-based implementation.
+        - ``"geomstats"``: Dense implementation using the current backend.
+        - ``"keops_genred"``: KeOps implementation using Genred reductions.
+        - ``"keops_lazy"``: KeOps implementation using LazyTensor reductions.
 
     Returns
     -------
     Pairing
-        An object implementing the kernel pairing.
+        Gaussian-Binet kernel pairing.
 
     Notes
     -----
-    The dense ("backend") implementation materializes pairwise matrices and is
-    memory-bound for large inputs. KeOps-based implementations avoid forming
-    the full kernel matrix and are more efficient for large-scale problems.
-
-    The "auto" backend does not guarantee optimal performance in all cases,
-    but provides a reasonable default based on available dependencies.
+    The dense ``"geomstats"`` implementation materializes pairwise matrices
+    and is memory-bound for large inputs. KeOps implementations avoid
+    materializing the full kernel matrix and are better suited to large-scale
+    computations.
     """
-    if backend == "auto":
-        has_keops = importlib.util.find_spec("pykeops") is not None
-        backend = "keops_genred" if has_keops else "backend"
-
-    if backend.endswith("_gpu"):
-        backend = backend[:-4]
-
-    if backend == "keops":
-        backend = "keops_genred"
-
-    if backend == "backend":
+    if engine == "geomstats":
         return _GaussianBinetPairing(sigma=sigma)
 
-    if backend == "keops_genred":
+    if engine == "keops_genred":
         import geomstats.varifold.keops.genred as gkeops
 
         return gkeops.GaussianBinetPairing(sigma)
 
-    if backend == "keops_lazy":
+    if engine == "keops_lazy":
         import geomstats.varifold.keops.lazy as lkeops
 
         return lkeops.SurfaceKernelPairing(lkeops.GaussianBinetKernel(sigma=sigma))
 
-    raise ValueError(f"Unknown backend: {backend}")
+    raise ValueError(f"Unknown engine: {engine}")
 
 
 class _GaussianBinetPairing(Pairing):
-    r"""Instantiate a Gaussian–Binet kernel pairing.
+    r"""Instantiate a Gaussian-Binet kernel pairing.
 
     This pairing is defined by
 
@@ -117,6 +99,27 @@ class _GaussianBinetPairing(Pairing):
 
         self._kernel = _compile(_kernel)
 
-    def kernel_prod(self, x, y, u, v, b):
-        """Apply the kernel pairing to a vector."""
-        return self._kernel(x, y, u, v) @ b
+    def kernel_prod(self, point_a, point_b):
+        """Apply the kernel operator to the second measure's weights.
+
+        Parameters
+        ----------
+        point_a : DiscreteMeasure
+            First measure.
+        point_b : DiscreteMeasure
+            Second measure.
+
+        Returns
+        -------
+        kernel_prod : array-like
+            Kernel reduction against ``point_b.weights``.
+        """
+        return (
+            self._kernel(
+                point_a.points,
+                point_b.points,
+                point_a.features,
+                point_b.features,
+            )
+            @ point_b.weights
+        )

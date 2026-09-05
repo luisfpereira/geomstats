@@ -3,6 +3,8 @@
 import geomstats.backend as gs
 from geomstats.varifold.base import Pairing
 
+from ._device import _keops_backend
+
 if gs.__name__.endswith("pytorch"):
     from pykeops.torch import Vi, Vj
 else:
@@ -10,18 +12,41 @@ else:
 
 
 class SurfaceKernelPairing(Pairing):
-    """A kernel pairing on surfaces.
+    """Kernel pairing on discrete surface measures.
 
     Parameters
     ----------
-    position_kernel : pykeops.LazyTensor
-    tangent_kernel : pykeops.LazyTensor
-    signal_kernel : pykeops.LazyTensor
+    kernel : pykeops.LazyTensor
+        Kernel acting on the surface points and features.
     """
 
     def __init__(self, kernel):
         area_b = Vj(kernel.new_variable_index(), 1)
-        self.kernel_prod = (kernel * area_b).sum_reduction(axis=1)
+        self._kernel_prod = (kernel * area_b).sum_reduction(axis=1)
+
+    def kernel_prod(self, point_a, point_b):
+        """Apply the kernel operator to the second measure's weights.
+
+        Parameters
+        ----------
+        point_a : DiscreteMeasure
+            First measure.
+        point_b : DiscreteMeasure
+            Second measure.
+
+        Returns
+        -------
+        kernel_prod : array-like
+            Kernel reduction against ``point_b.weights``.
+        """
+        return self._kernel_prod(
+            point_a.points,
+            point_b.points,
+            point_a.features,
+            point_b.features,
+            point_b.weights,
+            backend=_keops_backend(point_a.device),
+        )
 
 
 def GaussianKernel(sigma=1.0, init_index=0, dim=3):

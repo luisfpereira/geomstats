@@ -8,7 +8,8 @@ if gs.__name__.endswith("pytorch"):
 else:
     from pykeops.numpy import Genred
 
-from .._device import get_device, to_device
+from .._device import to_device
+from ._device import _keops_backend
 
 
 def GaussianKernel(sigma):
@@ -181,7 +182,7 @@ def UnorientedGaussianKernel(sigma=1.0):
 
 
 class GaussianBinetPairing(Pairing):
-    r"""Instantiate a Gaussian–Binet kernel pairing.
+    r"""Instantiate a Gaussian-Binet kernel pairing.
 
     This pairing is defined by
 
@@ -212,8 +213,30 @@ class GaussianBinetPairing(Pairing):
         )
         self._a_param = 1 / gs.array([sigma]) ** 2
 
-    def kernel_prod(self, *kernel_args):
-        """Apply the kernel pairing to a vector."""
-        a_param = to_device(self._a_param, get_device(kernel_args[0]))
+    def kernel_prod(self, point_a, point_b):
+        """Apply the kernel operator to the second measure's weights.
 
-        return self._expr(a_param, *kernel_args)
+        Parameters
+        ----------
+        point_a : DiscreteMeasure
+            First measure.
+        point_b : DiscreteMeasure
+            Second measure.
+
+        Returns
+        -------
+        kernel_prod : array-like
+            Kernel reduction against ``point_b.weights``.
+        """
+        device = point_a.device
+        a_param = to_device(self._a_param, device)
+
+        return self._expr(
+            a_param,
+            point_a.points,
+            point_b.points,
+            point_a.features,
+            point_b.features,
+            point_b.weights,
+            backend=_keops_backend(device),
+        )
