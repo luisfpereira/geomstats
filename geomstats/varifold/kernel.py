@@ -15,7 +15,7 @@ else:
         return fn
 
 
-def GaussianBinetPairing(sigma, engine):
+def GaussianBinetPairing(sigma, engine, cache=True):
     r"""Instantiate a Gaussian-Binet kernel pairing.
 
     The kernel is defined by
@@ -35,6 +35,8 @@ def GaussianBinetPairing(sigma, engine):
         - ``"geomstats"``: Dense implementation using the current backend.
         - ``"keops_genred"``: KeOps implementation using Genred reductions.
         - ``"keops_lazy"``: KeOps implementation using LazyTensor reductions.
+    cache : bool
+        Whether to cache self-pairings.
 
     Returns
     -------
@@ -49,17 +51,19 @@ def GaussianBinetPairing(sigma, engine):
     computations.
     """
     if engine == "geomstats":
-        return _GaussianBinetPairing(sigma=sigma)
+        return _GaussianBinetPairing(sigma=sigma, cache=cache)
 
     if engine == "keops_genred":
         import geomstats.varifold.keops.genred as gkeops
 
-        return gkeops.GaussianBinetPairing(sigma)
+        return gkeops.GaussianBinetPairing(sigma, cache=cache)
 
     if engine == "keops_lazy":
         import geomstats.varifold.keops.lazy as lkeops
 
-        return lkeops.SurfaceKernelPairing(lkeops.GaussianBinetKernel(sigma=sigma))
+        return lkeops.SurfaceKernelPairing(
+            lkeops.GaussianBinetKernel(sigma=sigma), cache=cache
+        )
 
     raise ValueError(f"Unknown engine: {engine}")
 
@@ -77,14 +81,16 @@ class _GaussianBinetPairing(Pairing):
     ----------
     sigma : float
         Positive bandwidth parameter of the Gaussian kernel.
+    cache : bool
+        Whether to cache self-pairings.
 
     Notes
     -----
     It materializes pairwise matrices and is memory-bound for large inputs.
     """
 
-    def __init__(self, sigma):
-        super().__init__()
+    def __init__(self, sigma, cache=True):
+        super().__init__(cache=cache)
 
         def _kernel(x, y, u, v):
             x_norm2 = gs.sum(x**2, axis=1)[:, None]

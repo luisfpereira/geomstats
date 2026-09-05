@@ -21,6 +21,7 @@ References
 """
 
 import abc
+import weakref
 
 import geomstats.backend as gs
 from geomstats._mesh import Surface
@@ -40,12 +41,32 @@ class KernelInducedMetric(abc.ABC):
         Kernel pairing used to define the metric.
     """
 
-    def __init__(self, pairing):
+    def __init__(self, pairing, cache=True):
         self.pairing = pairing
 
+        self._cache = cache
+        self._transform_cache = weakref.WeakKeyDictionary()
+
+    def reset_cache(self):
+        """Clear cached representations."""
+        self._transform_cache.clear()
+        self.pairing.reset_cache()
+
     @abc.abstractmethod
+    def _transform(self, point):
+        """Transform a point into the representation used by the pairing."""
+
     def transform(self, point):
         """Transform a point into the representation used by the pairing."""
+        if not self._cache:
+            return self._transform(point)
+
+        try:
+            return self._transform_cache[point]
+        except KeyError:
+            transformed = self._transform(point)
+            self._transform_cache[point] = transformed
+            return transformed
 
     def scalar_product(self, point_a, point_b):
         """Compute the scalar product between two points.
@@ -86,9 +107,9 @@ class KernelInducedMetric(abc.ABC):
         point_b = self.transform(point_b)
 
         sdist = (
-            self.pairing(point_a, point_a)
+            self.pairing.self_pair(point_a)
             - 2 * self.pairing(point_a, point_b)
-            + self.pairing(point_b, point_b)
+            + self.pairing.self_pair(point_b)
         )
         return to_cpu(sdist)
 
@@ -131,7 +152,7 @@ class KernelInducedMetric(abc.ABC):
             target_faces = target_point.faces
 
         target_point = self.transform(target_point)
-        kernel_target = self.pairing(target_point, target_point)
+        kernel_target = self.pairing.self_pair(target_point)
 
         def squared_dist(vertices):
             point = Surface(vertices, target_faces)
@@ -139,7 +160,7 @@ class KernelInducedMetric(abc.ABC):
             return (
                 kernel_target
                 - 2 * self.pairing(target_point, point)
-                + self.pairing(point, point)
+                + self.self_pair(point)
             )
 
         return squared_dist
@@ -192,17 +213,17 @@ class VarifoldMetric(KernelInducedMetric):
         and CPU otherwise. If ``None``, no device is selected.
     """
 
-    def __init__(self, sigma, engine="auto", device="auto"):
+    def __init__(self, sigma, engine="auto", device="auto", cache=True):
         self.sigma = sigma
 
         self._engine = resolve_engine(engine)
 
-        pairing = GaussianBinetPairing(sigma, engine=self._engine)
-        super().__init__(pairing)
+        pairing = GaussianBinetPairing(sigma, engine=self._engine, cache=cache)
+        super().__init__(pairing, cache)
 
         self._device = resolve_device(device)
 
-    def transform(self, point):
+    def _transform(self, point):
         """Convert a surface to its discrete measure representation.
 
         Parameters

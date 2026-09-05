@@ -1,6 +1,7 @@
 """Discrete measure representations and kernel pairings."""
 
 import abc
+import weakref
 
 import geomstats.backend as gs
 
@@ -57,7 +58,44 @@ class DiscreteMeasure:
 
 
 class Pairing(abc.ABC):
-    """Kernel pairing between discrete measures."""
+    """Kernel pairing between discrete measures.
+
+    Parameters
+    ----------
+    cache : bool
+        Whether to cache self-pairings.
+    """
+
+    def __init__(self, cache=True):
+        self._cache = cache
+        self._self_pair_cache = weakref.WeakKeyDictionary()
+
+    def reset_cache(self):
+        """Clear cached self-pairings."""
+        self._self_pair_cache.clear()
+
+    def self_pair(self, point):
+        """Evaluate the self-pairing of a point.
+
+        Parameters
+        ----------
+        point : DiscreteMeasure
+            Point to pair with itself.
+
+        Returns
+        -------
+        scalar : float
+            Self-pairing of the point.
+        """
+        if not self._cache:
+            return self(point, point)
+
+        try:
+            return self._self_pair_cache[point]
+        except KeyError:
+            value = self(point, point)
+            self._self_pair_cache[point] = value
+            return value
 
     def __call__(self, point_a, point_b):
         """Evaluate the pairing.

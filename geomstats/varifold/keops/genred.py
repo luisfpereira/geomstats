@@ -194,10 +194,12 @@ class GaussianBinetPairing(Pairing):
     ----------
     sigma : float
         Positive bandwidth parameter of the Gaussian kernel.
+    cache : bool
+        Whether to cache self-pairings.
     """
 
-    def __init__(self, sigma):
-        super().__init__()
+    def __init__(self, sigma, cache=True):
+        super().__init__(cache=cache)
         self._expr = Genred(
             "Exp(-SqDist(x,y)*a)*Square((u|v))*b",
             [

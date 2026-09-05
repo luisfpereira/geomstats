@@ -18,9 +18,12 @@ class SurfaceKernelPairing(Pairing):
     ----------
     kernel : pykeops.LazyTensor
         Kernel acting on the surface points and features.
+    cache : bool
+        Whether to cache self-pairings.
     """
 
-    def __init__(self, kernel):
+    def __init__(self, kernel, cache=True):
+        super().__init__(cache=cache)
         area_b = Vj(kernel.new_variable_index(), 1)
         self._kernel_prod = (kernel * area_b).sum_reduction(axis=1)
 
