@@ -4,6 +4,7 @@ import geomstats.backend as gs
 from geomstats.test.random import RandomDataGenerator
 from geomstats.test.test_case import TestCase
 from geomstats.test.vectorization import generate_vectorization_data
+from geomstats.vectorization import get_batch_shape
 
 
 class _ManifoldTestCaseMixins:
@@ -21,6 +22,12 @@ class _ManifoldTestCaseMixins:
     def test_belongs(self, point, expected, atol):
         res = self.space.belongs(point, atol=atol)
         self.assertAllEqual(res, expected)
+
+    def test_belongs_is_true(self, point, atol):
+        batch_shape = get_batch_shape(self.space.point_ndim, point)
+        expected = gs.ones(batch_shape, dtype=bool)
+
+        self.test_belongs(point, expected, atol)
 
     @pytest.mark.random
     def test_not_belongs(self, n_points, atol):
@@ -137,6 +144,20 @@ class _ManifoldTestCaseMixins:
         tangent_vec = self.data_generator.random_tangent_vec(base_point)
 
         expected = gs.ones(n_points, dtype=bool)
+        self.test_is_tangent(tangent_vec, base_point, expected, atol)
+
+    def test_assert_is_tangent(self, tangent_vec, base_point, atol):
+        """Check to_tangent returns tangent vector.
+
+        Parameters
+        ----------
+        n_points : int
+            Number of random points to generate.
+        atol : float
+            Absolute tolerance.
+        """
+        batch_shape = get_batch_shape(self.space.point_ndim, base_point, tangent_vec)
+        expected = gs.ones(batch_shape, dtype=bool)
         self.test_is_tangent(tangent_vec, base_point, expected, atol)
 
     @pytest.mark.shape

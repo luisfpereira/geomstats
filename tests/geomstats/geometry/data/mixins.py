@@ -1,0 +1,147 @@
+import pytest
+from polpo.testing.data import LazyValue, TestDatum
+
+from geomstats.test.random import get_random_times
+
+
+class ProjectionMixinsTestData:
+    def projection_belongs_test_data(self):
+        data = []
+
+        for n_points in self.point_counts:
+            point = LazyValue(
+                lambda n=n_points: self.data_generator.point_to_project(n),
+                label=f"n={n_points}",
+            )
+
+            data.append(
+                TestDatum(
+                    {"point": point},
+                    marks=(pytest.mark.random,),
+                )
+            )
+
+        return data
+
+
+class ProjectionMixinsVecTestData:
+    def projection_vec_test_data(self):
+        point = LazyValue(
+            lambda: self.data_generator.point_to_project(1),
+            label="n=1",
+        )
+
+        expected = LazyValue(
+            lambda point: self.space.projection(point),
+            point,
+        )
+
+        return self._vectorize_datum(
+            {"point": point},
+            expected,
+            vectorization_type="basic",
+        )
+
+
+class DistMixinsTestData:
+    def squared_dist_is_symmetric_test_data(self):
+        return self.generate_random_data(
+            arg_names=("point_a", "point_b"),
+        )
+
+    def squared_dist_is_positive_test_data(self):
+        return self.generate_random_data(
+            arg_names=("point_a", "point_b"),
+        )
+
+    @pytest.mark.redundant
+    def dist_is_symmetric_test_data(self):
+        return self.generate_random_data(
+            arg_names=("point_a", "point_b"),
+        )
+
+    @pytest.mark.redundant
+    def dist_is_positive_test_data(self):
+        return self.generate_random_data(
+            arg_names=("point_a", "point_b"),
+        )
+
+    def dist_point_to_itself_is_zero_test_data(self):
+        return self.generate_random_data(
+            arg_names="point",
+        )
+
+    def dist_triangle_inequality_test_data(self):
+        return self.generate_random_data(
+            arg_names=("point_a", "point_b", "point_c"),
+        )
+
+
+class DistMixinsVecTestData:
+    def squared_dist_vec_test_data(self):
+        return self.generate_vectorization_data(
+            arg_names=("point_a", "point_b"),
+            on_metric=True,
+        )
+
+    @pytest.mark.redundant
+    def dist_vec_test_data(self):
+        return self.generate_vectorization_data(
+            arg_names=("point_a", "point_b"),
+            on_metric=True,
+        )
+
+
+class GeodesicBVPMixinsTestData:
+    def geodesic_boundary_points_test_data(self):
+        return self.generate_random_data(
+            arg_names=(
+                "initial_point",
+                "end_point",
+            ),
+        )
+
+    def geodesic_bvp_reverse_test_data(self):
+        data = []
+        for n_times in self.time_counts:
+            time = get_random_times(n_times)
+            data_ = self.generate_random_data(
+                arg_names=("initial_point", "end_point"),
+                time=time,
+            )
+
+            data.extend(data_)
+
+        return data
+
+    def geodesic_bvp_belongs_test_data(self):
+        data = []
+        for n_times in self.time_counts:
+            time = get_random_times(n_times)
+            data_ = self.generate_random_data(
+                arg_names=("initial_point", "end_point"),
+                time=time,
+            )
+
+            data.extend(data_)
+
+        return data
+
+
+class GeodesicBVPMixinsVecTestData:
+    def geodesic_bvp_vec_test_data(self):
+        data = []
+        for n_times in self.time_counts:
+            time = get_random_times(n_times)
+
+            data_ = self.generate_vectorization_data(
+                arg_names=("initial_point", "end_point"),
+                op_name="geodesic",
+                expected_func=lambda op, time=time, **kwargs: op(**kwargs)(time),
+                time=time,
+                on_metric=True,
+            )
+
+            data.extend(data_)
+
+        return data

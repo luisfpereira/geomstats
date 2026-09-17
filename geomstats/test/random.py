@@ -1,5 +1,7 @@
+from functools import singledispatch
+
 import geomstats.backend as gs
-from geomstats.geometry.base import ComplexMatrixVectorSpace
+from geomstats.geometry.base import ComplexMatrixVectorSpace, LevelSet
 from geomstats.geometry.euclidean import Euclidean
 from geomstats.geometry.general_linear import SquareMatrices
 from geomstats.vectorization import get_n_points
@@ -78,6 +80,18 @@ class MatrixVectorSpaceRandomDataGenerator(VectorSpaceRandomDataGenerator):
             (n_points, -1),
             dtype=dtype,
         )
+
+
+@singledispatch
+def get_data_generator(space):
+    raise NotImplementedError(
+        f"No data generator registered for {type(space).__name__}."
+    )
+
+
+@get_data_generator.register(LevelSet)
+def _(space):
+    return EmbeddedSpaceRandomDataGenerator(space)
 
 
 class EmbeddedSpaceRandomDataGenerator(RandomDataGenerator):
