@@ -1,4 +1,4 @@
-from polpo.testing.data import GeometricCaseData
+from polpo.testing.geometric import GeometricCaseData
 
 import geomstats.backend as gs
 
@@ -22,8 +22,6 @@ class _ManifoldMixinsTestData:
             atol=gs.atol,
         )
 
-
-class _ManifoldMixinsVecTestData:
     def belongs_vec_test_data(self):
         return self.generate_vectorization_data(arg_names="point")
 
@@ -35,8 +33,4 @@ class _ManifoldMixinsVecTestData:
 
 
 class ManifoldTestData(_ManifoldMixinsTestData, GeometricCaseData):
-    pass
-
-
-class ManifoldVecTestData(_ManifoldMixinsVecTestData, GeometricCaseData):
     pass

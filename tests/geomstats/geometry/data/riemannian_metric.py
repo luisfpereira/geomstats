@@ -3,11 +3,10 @@ import pytest
 from .connection import (
     ConnectionComparisonTestData,
     ConnectionFromChristoffelsComparisonTestData,
-    ConnectionFromChristoffelsVecTestData,
+    ConnectionFromChristoffelsTestData,
     ConnectionTestData,
-    ConnectionVecTestData,
 )
-from .mixins import DistMixinsTestData, DistMixinsVecTestData
+from .mixins import DistMixinsTestData
 
 
 class RiemannianMetricTestData(DistMixinsTestData, ConnectionTestData):
@@ -42,35 +41,6 @@ class RiemannianMetricTestData(DistMixinsTestData, ConnectionTestData):
             dependencies={"tangent_vec": "base_point"},
         )
 
-
-class RiemannianMetricFromMatrixTestData(RiemannianMetricTestData):
-    def metric_matrix_is_spd_test_data(self):
-        return self.generate_random_data(
-            arg_names="base_point",
-        )
-
-    def covariant_riemann_tensor_is_skew_symmetric_1_test_data(self):
-        return self.generate_random_data(
-            arg_names="base_point",
-        )
-
-    def covariant_riemann_tensor_is_skew_symmetric_2_test_data(self):
-        return self.generate_random_data(
-            arg_names="base_point",
-        )
-
-    def covariant_riemann_tensor_bianchi_identity_test_data(self):
-        return self.generate_random_data(
-            arg_names="base_point",
-        )
-
-    def covariant_riemann_tensor_is_interchange_symmetric_test_data(self):
-        return self.generate_random_data(
-            arg_names="base_point",
-        )
-
-
-class RiemannianMetricVecTestData(DistMixinsVecTestData, ConnectionVecTestData):
     def inner_product_vec_test_data(self):
         return self.generate_vectorization_data(
             arg_names=("base_point", "tangent_vec_a", "tangent_vec_b"),
@@ -104,10 +74,34 @@ class RiemannianMetricVecTestData(DistMixinsVecTestData, ConnectionVecTestData):
         )
 
 
-class RiemannianMetricFromMatrixVecTestData(
-    RiemannianMetricVecTestData,
-    ConnectionFromChristoffelsVecTestData,
+class RiemannianMetricFromMatrixTestData(
+    ConnectionFromChristoffelsTestData, RiemannianMetricTestData
 ):
+    def metric_matrix_is_spd_test_data(self):
+        return self.generate_random_data(
+            arg_names="base_point",
+        )
+
+    def covariant_riemann_tensor_is_skew_symmetric_1_test_data(self):
+        return self.generate_random_data(
+            arg_names="base_point",
+        )
+
+    def covariant_riemann_tensor_is_skew_symmetric_2_test_data(self):
+        return self.generate_random_data(
+            arg_names="base_point",
+        )
+
+    def covariant_riemann_tensor_bianchi_identity_test_data(self):
+        return self.generate_random_data(
+            arg_names="base_point",
+        )
+
+    def covariant_riemann_tensor_is_interchange_symmetric_test_data(self):
+        return self.generate_random_data(
+            arg_names="base_point",
+        )
+
     def metric_matrix_vec_test_data(self):
         return self.generate_vectorization_data(
             arg_names="base_point",

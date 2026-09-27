@@ -1,10 +1,10 @@
 import pytest
-from polpo.testing.data import GeometricCaseData
+from polpo.testing.geometric import GeometricCaseData
 
 import geomstats.backend as gs
 from geomstats.test.random import get_random_times
 
-from .mixins import GeodesicBVPMixinsTestData, GeodesicBVPMixinsVecTestData
+from .mixins import GeodesicBVPMixinsTestData
 
 
 class ConnectionTestData(GeodesicBVPMixinsTestData, GeometricCaseData):
@@ -65,8 +65,6 @@ class ConnectionTestData(GeodesicBVPMixinsTestData, GeometricCaseData):
             dependencies={"tangent_vec": "base_point"},
         )
 
-
-class ConnectionVecTestData(GeodesicBVPMixinsVecTestData, GeometricCaseData):
     def exp_vec_test_data(self):
         return self.generate_vectorization_data(
             arg_names=("base_point", "tangent_vec"),
@@ -121,7 +119,7 @@ class ConnectionVecTestData(GeodesicBVPMixinsVecTestData, GeometricCaseData):
         )
 
 
-class ConnectionFromChristoffelsVecTestData(ConnectionVecTestData):
+class ConnectionFromChristoffelsTestData(ConnectionTestData):
     def christoffels_vec_test_data(self):
         return self.generate_vectorization_data(
             arg_names="base_point",

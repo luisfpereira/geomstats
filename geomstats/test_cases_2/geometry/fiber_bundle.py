@@ -2,9 +2,6 @@ import geomstats.backend as gs
 from geomstats.test.test_case import TestCase
 from geomstats.vectorization import get_batch_shape
 
-# TODO: all expected shape from input?
-# TODO: make a instantiate ones?
-
 
 class FiberBundleTestCase(TestCase):
     def _test_belongs_to_base(self, point, expected, atol=gs.atol):

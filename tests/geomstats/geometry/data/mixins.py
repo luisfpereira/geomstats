@@ -1,5 +1,6 @@
 import pytest
-from polpo.testing.data import LazyValue, TestDatum
+from polpo.testing.data import TestDatum
+from polpo.testing.lazy import LazyValue
 
 from geomstats.test.random import get_random_times
 
@@ -29,8 +30,6 @@ class ProjectionMixinsTestData:
 
         return data
 
-
-class ProjectionMixinsVecTestData:
     def projection_vec_test_data(self):
         point = LazyValue(
             _point_to_project,
@@ -84,8 +83,6 @@ class DistMixinsTestData:
             arg_names=("point_a", "point_b", "point_c"),
         )
 
-
-class DistMixinsVecTestData:
     def squared_dist_vec_test_data(self):
         return self.generate_vectorization_data(
             arg_names=("point_a", "point_b"),
@@ -135,8 +132,6 @@ class GeodesicBVPMixinsTestData:
 
         return data
 
-
-class GeodesicBVPMixinsVecTestData:
     def geodesic_bvp_vec_test_data(self):
         data = []
         for n_times in self.time_counts:

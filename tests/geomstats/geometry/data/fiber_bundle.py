@@ -1,57 +1,24 @@
 import operator
 
-from polpo.testing.data import FiberBundleCaseData, LazyValue
+from polpo.testing.geometric import FiberBundleCaseData
+from polpo.testing.lazy import LazyValue
 
 from geomstats.vectorization import repeat_point
 
 
 class FiberBundleTestData(FiberBundleCaseData):
     def riemannian_submersion_belongs_to_base_test_data(self):
-        return self.generate_random_data(
-            arg_names="point",
-        )
+        return self.generate_random_data(arg_names="point")
 
     def lift_belongs_to_total_space_test_data(self):
-        return self.generate_random_data(
-            arg_names="point",
-            space="base",
-        )
+        return self.generate_random_data(arg_names="point", space="base")
 
     def riemannian_submersion_after_lift_test_data(self):
-        return self.generate_random_data(
-            arg_names="point",
-            space="base",
-        )
-
-    def tangent_riemannian_submersion_is_tangent_test_data(self):
-        return self.generate_random_data(arg_names=("base_point", "tangent_vec"))
+        return self.generate_random_data(arg_names="point", space="base")
 
     def log_after_align_is_horizontal_test_data(self):
         return self.generate_random_data(arg_names=("base_point", "point"))
 
-    def horizontal_projection_is_horizontal_test_data(self):
-        return self.generate_random_data(arg_names=("base_point", "tangent_vec"))
-
-    def vertical_projection_is_vertical_test_data(self):
-        return self.generate_random_data(arg_names=("base_point", "tangent_vec"))
-
-    def tangent_riemannian_submersion_after_vertical_projection_test_data(self):
-        return self.generate_random_data(arg_names=("base_point", "tangent_vec"))
-
-    def horizontal_lift_is_horizontal_test_data(self):
-        return self.generate_random_data(
-            arg_names=("base_point", "tangent_vec"),
-            space="base",
-        )
-
-    def tangent_riemannian_submersion_after_horizontal_lift_test_data(self):
-        return self.generate_random_data(
-            arg_names=("base_point", "tangent_vec"),
-            space="base",
-        )
-
-
-class FiberBundleVecTestData(FiberBundleCaseData):
     def riemannian_submersion_vec_test_data(self):
         return self.generate_vectorization_data(
             arg_names=("point"),
@@ -63,40 +30,9 @@ class FiberBundleVecTestData(FiberBundleCaseData):
             space="base",
         )
 
-    def tangent_riemannian_submersion_vec_test_data(self):
-        return self.generate_vectorization_data(
-            arg_names=("base_point", "tangent_vec"),
-        )
-
     def align_vec_test_data(self):
         return self.generate_vectorization_data(
             arg_names=("base_point", "point"),
-        )
-
-    def horizontal_projection_vec_test_data(self):
-        return self.generate_vectorization_data(
-            arg_names=("base_point", "tangent_vec"),
-        )
-
-    def vertical_projection_vec_test_data(self):
-        return self.generate_vectorization_data(
-            arg_names=("base_point", "tangent_vec"),
-        )
-
-    def is_horizontal_vec_test_data(self):
-        return self.generate_vectorization_data(
-            arg_names=("base_point", "tangent_vec"),
-        )
-
-    def is_vertical_vec_test_data(self):
-        return self.generate_vectorization_data(
-            arg_names=("base_point", "tangent_vec"),
-        )
-
-    def horizontal_lift_vec_test_data(self):
-        return self.generate_vectorization_base_space_data(
-            arg_names=("base_point", "tangent_vec"),
-            space="base",
         )
 
     def integrability_tensor_vec_test_data(self):
@@ -154,3 +90,83 @@ class FiberBundleVecTestData(FiberBundleCaseData):
         )
 
         return [vectorized_datum]
+
+
+class FiberBundleSubmersionLiftTestData(FiberBundleCaseData):
+    """Test data for fiber bundles defined through submersion and horizontal lift.
+
+    This test suite targets implementations that provide
+    `tangent_riemannian_submersion` and `horizontal_lift`, and rely on the
+    generic `FiberBundle` implementation for horizontal and vertical
+    projections.
+
+    It checks the two fundamental properties of this implementation:
+
+    - `tangent_riemannian_submersion` maps tangent vectors of the total
+      space to tangent vectors of the base space;
+    - `horizontal_lift` is a right inverse of
+      `tangent_riemannian_submersion`.
+
+    These properties are sufficient to derive the corresponding horizontal
+    and vertical projection identities, since `horizontal_projection` is
+    obtained by composing `horizontal_lift` with
+    `tangent_riemannian_submersion`, and `vertical_projection` is its
+    complement.
+    """
+
+    def tangent_riemannian_submersion_is_tangent_test_data(self):
+        return self.generate_random_data(arg_names=("base_point", "tangent_vec"))
+
+    def tangent_riemannian_submersion_after_horizontal_lift_test_data(self):
+        return self.generate_random_data(
+            arg_names=("base_point", "tangent_vec"),
+            space="base",
+        )
+
+    def tangent_riemannian_submersion_vec_test_data(self):
+        return self.generate_vectorization_data(
+            arg_names=("base_point", "tangent_vec"),
+        )
+
+    def horizontal_lift_vec_test_data(self):
+        return self.generate_vectorization_base_space_data(
+            arg_names=("base_point", "tangent_vec"),
+            space="base",
+        )
+
+
+class FiberBundleProjectionTestData(FiberBundleCaseData):
+    def horizontal_projection_is_horizontal_test_data(self):
+        return self.generate_random_data(arg_names=("base_point", "tangent_vec"))
+
+    def vertical_projection_is_vertical_test_data(self):
+        return self.generate_random_data(arg_names=("base_point", "tangent_vec"))
+
+    def tangent_riemannian_submersion_after_vertical_projection_test_data(self):
+        return self.generate_random_data(arg_names=("base_point", "tangent_vec"))
+
+    def horizontal_lift_is_horizontal_test_data(self):
+        return self.generate_random_data(
+            arg_names=("base_point", "tangent_vec"),
+            space="base",
+        )
+
+    def horizontal_projection_vec_test_data(self):
+        return self.generate_vectorization_data(
+            arg_names=("base_point", "tangent_vec"),
+        )
+
+    def vertical_projection_vec_test_data(self):
+        return self.generate_vectorization_data(
+            arg_names=("base_point", "tangent_vec"),
+        )
+
+    def is_horizontal_vec_test_data(self):
+        return self.generate_vectorization_data(
+            arg_names=("base_point", "tangent_vec"),
+        )
+
+    def is_vertical_vec_test_data(self):
+        return self.generate_vectorization_data(
+            arg_names=("base_point", "tangent_vec"),
+        )

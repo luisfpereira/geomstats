@@ -1,6 +1,7 @@
 import random
 
 import pytest
+from polpo.testing.composition import MarkedGeometricTestData
 from polpo.testing.parametrizers import (
     DataBasedParametrizer,
     GeometricDataBasedParametrizer,
@@ -17,8 +18,12 @@ from geomstats.test_cases_2.geometry.riemannian_metric import (
     RiemannianMetricTestCase,
 )
 
-from .data.base import LevelSetTestData, LevelSetVecTestData
-from .data.fiber_bundle import FiberBundleTestData, FiberBundleVecTestData
+from .data.base import LevelSetTestData
+from .data.fiber_bundle import (
+    FiberBundleProjectionTestData,
+    FiberBundleSubmersionLiftTestData,
+    FiberBundleTestData,
+)
 from .data.grassmannian import (
     Grassmannian32TestData,
     GrassmannianCanonicalMetric32TestData,
@@ -26,7 +31,6 @@ from .data.grassmannian import (
 from .data.riemannian_metric import (
     RiemannianMetricComparisonTestData,
     RiemannianMetricTestData,
-    RiemannianMetricVecTestData,
 )
 
 
@@ -60,12 +64,12 @@ def spaces(request):
     n, p = request.param
     space = request.cls.space = Grassmannian(n=n, p=p, equip=False)
 
-    request.cls.testing_data.propagate("space", space)
+    request.cls.testing_data.space = space
 
 
 @pytest.mark.usefixtures("spaces")
 class TestGrassmannian(LevelSetTestCase, metaclass=GeometricDataBasedParametrizer):
-    testing_data = LevelSetTestData() + LevelSetVecTestData()
+    testing_data = LevelSetTestData()
 
 
 @pytest.mark.smoke
@@ -86,14 +90,14 @@ def equipped_spaces(request):
     request.cls.space = space
     space.equip_with_metric(GrassmannianCanonicalMetric)
 
-    request.cls.testing_data.propagate("space", space)
+    request.cls.testing_data.space = space
 
 
 @pytest.mark.usefixtures("equipped_spaces")
 class TestGrassmannianCanonicalMetric(
     RiemannianMetricTestCase, metaclass=GeometricDataBasedParametrizer
 ):
-    testing_data = RiemannianMetricTestData() + RiemannianMetricVecTestData()
+    testing_data = RiemannianMetricTestData()
 
 
 class TestGrassmannianBundle(FiberBundleTestCase, metaclass=DataBasedParametrizer):
@@ -107,7 +111,13 @@ class TestGrassmannianBundle(FiberBundleTestCase, metaclass=DataBasedParametrize
 
     base_space = Grassmannian(_n, _p, equip=False)
 
-    testing_data = FiberBundleTestData() + FiberBundleVecTestData()
+    testing_data = (
+        FiberBundleTestData()
+        + FiberBundleSubmersionLiftTestData()
+        + MarkedGeometricTestData(
+            FiberBundleProjectionTestData(), marks=(pytest.mark.redundant,)
+        )
+    )
     testing_data.propagate("total_space", total_space)
     testing_data.propagate("base_space", base_space)
 
