@@ -1,5 +1,5 @@
 import pytest
-from polpo.testing.data import GeometricTestData
+from polpo.testing.data import GeometricCaseData
 
 import geomstats.backend as gs
 from geomstats.test.random import get_random_times
@@ -7,7 +7,7 @@ from geomstats.test.random import get_random_times
 from .mixins import GeodesicBVPMixinsTestData, GeodesicBVPMixinsVecTestData
 
 
-class ConnectionTestData(GeodesicBVPMixinsTestData, GeometricTestData):
+class ConnectionTestData(GeodesicBVPMixinsTestData, GeometricCaseData):
     def exp_belongs_test_data(self):
         return self.generate_random_data(
             arg_names=("base_point", "tangent_vec"),
@@ -66,7 +66,7 @@ class ConnectionTestData(GeodesicBVPMixinsTestData, GeometricTestData):
         )
 
 
-class ConnectionVecTestData(GeodesicBVPMixinsVecTestData, GeometricTestData):
+class ConnectionVecTestData(GeodesicBVPMixinsVecTestData, GeometricCaseData):
     def exp_vec_test_data(self):
         return self.generate_vectorization_data(
             arg_names=("base_point", "tangent_vec"),
@@ -87,7 +87,7 @@ class ConnectionVecTestData(GeodesicBVPMixinsVecTestData, GeometricTestData):
             data_ = self.generate_vectorization_data(
                 arg_names=("initial_point", "initial_tangent_vec"),
                 op_name="geodesic",
-                expected_func=lambda op, time=time, **kwargs: op(**kwargs)(time),
+                op_evaluator=lambda op, time=time, **kwargs: op(**kwargs)(time),
                 time=time,
                 on_metric=True,
             )
@@ -133,7 +133,7 @@ class ConnectionFromChristoffelsVecTestData(ConnectionVecTestData):
             arg_names=("base_point", "tangent_vec"),
             on_metric=True,
             vectorization_type="basic",
-            expected_func=lambda op, base_point, tangent_vec: op(
+            op_evaluator=lambda op, base_point, tangent_vec: op(
                 gs.stack([base_point, tangent_vec])
             ),
         )
@@ -194,7 +194,7 @@ class ConnectionFromChristoffelsVecTestData(ConnectionVecTestData):
         )
 
 
-class ConnectionComparisonTestData(GeometricTestData):
+class ConnectionComparisonTestData(GeometricCaseData):
     def exp_test_data(self):
         return self.generate_random_data(
             arg_names=("base_point", "tangent_vec"),

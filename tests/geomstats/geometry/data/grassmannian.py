@@ -1,10 +1,10 @@
-from polpo.testing.data import TestData
+from polpo.testing.data import CaseData
 
 import geomstats.backend as gs
 from geomstats.geometry.matrices import Matrices
 
 
-class Grassmannian32TestData(TestData):
+class Grassmannian32TestData(CaseData):
     def belongs_test_data(self):
         p_xy = gs.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]])
         p_yz = gs.array([[0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
@@ -16,7 +16,7 @@ class Grassmannian32TestData(TestData):
         ]
 
 
-class GrassmannianCanonicalMetric32TestData(TestData):
+class GrassmannianCanonicalMetric32TestData(CaseData):
     def exp_test_data(self):
         p_xy = gs.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]])
         p_yz = gs.array([[0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])

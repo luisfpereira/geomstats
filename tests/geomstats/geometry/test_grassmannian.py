@@ -10,15 +10,15 @@ from geomstats.geometry.grassmannian import Grassmannian, GrassmannianCanonicalM
 from geomstats.geometry.quotient_metric import QuotientMetric
 from geomstats.geometry.scalar_product_metric import ScalarProductMetric
 from geomstats.geometry.stiefel import Stiefel, StiefelCanonicalMetric
-from geomstats.test.random import get_data_generator
-from geomstats.test_cases.geometry.fiber_bundle import FiberBundleTestCase
 from geomstats.test_cases_2.geometry.base import LevelSetTestCase
+from geomstats.test_cases_2.geometry.fiber_bundle import FiberBundleTestCase
 from geomstats.test_cases_2.geometry.riemannian_metric import (
     RiemannianMetricComparisonTestCase,
     RiemannianMetricTestCase,
 )
 
 from .data.base import LevelSetTestData, LevelSetVecTestData
+from .data.fiber_bundle import FiberBundleTestData, FiberBundleVecTestData
 from .data.grassmannian import (
     Grassmannian32TestData,
     GrassmannianCanonicalMetric32TestData,
@@ -59,9 +59,8 @@ class TestGrassmannian32(LevelSetTestCase, metaclass=DataBasedParametrizer):
 def spaces(request):
     n, p = request.param
     space = request.cls.space = Grassmannian(n=n, p=p, equip=False)
-    request.cls.testing_data.data_generator = get_data_generator(space)
 
-    request.cls.testing_data.space = space
+    request.cls.testing_data.propagate("space", space)
 
 
 @pytest.mark.usefixtures("spaces")
@@ -87,7 +86,7 @@ def equipped_spaces(request):
     request.cls.space = space
     space.equip_with_metric(GrassmannianCanonicalMetric)
 
-    request.cls.testing_data.space = space
+    request.cls.testing_data.propagate("space", space)
 
 
 @pytest.mark.usefixtures("equipped_spaces")
@@ -106,9 +105,11 @@ class TestGrassmannianBundle(FiberBundleTestCase, metaclass=DataBasedParametrize
     total_space.equip_with_group_action("right_orthogonal_action")
     total_space.equip_with_quotient()
 
-    base = Grassmannian(_n, _p, equip=False)
+    base_space = Grassmannian(_n, _p, equip=False)
 
-    testing_data = GrassmannianBundleTestData()
+    testing_data = FiberBundleTestData() + FiberBundleVecTestData()
+    testing_data.propagate("total_space", total_space)
+    testing_data.propagate("base_space", base_space)
 
 
 @pytest.fixture(

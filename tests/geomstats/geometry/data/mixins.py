@@ -4,13 +4,19 @@ from polpo.testing.data import LazyValue, TestDatum
 from geomstats.test.random import get_random_times
 
 
+def _point_to_project(data_generator, n_points):
+    return data_generator.point_to_project(n_points)
+
+
 class ProjectionMixinsTestData:
     def projection_belongs_test_data(self):
         data = []
 
         for n_points in self.point_counts:
             point = LazyValue(
-                lambda n=n_points: self.data_generator.point_to_project(n),
+                _point_to_project,
+                self.data_generator,
+                n_points,
                 label=f"n={n_points}",
             )
 
@@ -27,7 +33,9 @@ class ProjectionMixinsTestData:
 class ProjectionMixinsVecTestData:
     def projection_vec_test_data(self):
         point = LazyValue(
-            lambda: self.data_generator.point_to_project(1),
+            _point_to_project,
+            self.data_generator,
+            1,
             label="n=1",
         )
 
@@ -137,7 +145,7 @@ class GeodesicBVPMixinsVecTestData:
             data_ = self.generate_vectorization_data(
                 arg_names=("initial_point", "end_point"),
                 op_name="geodesic",
-                expected_func=lambda op, time=time, **kwargs: op(**kwargs)(time),
+                op_evaluator=lambda op, time=time, **kwargs: op(**kwargs)(time),
                 time=time,
                 on_metric=True,
             )
