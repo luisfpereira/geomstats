@@ -1,9 +1,5 @@
-import operator
-
 from polpo.testing.geometric import FiberBundleCaseData
 from polpo.testing.lazy import LazyValue
-
-from geomstats.vectorization import repeat_point
 
 
 class FiberBundleTestData(FiberBundleCaseData):
@@ -11,10 +7,16 @@ class FiberBundleTestData(FiberBundleCaseData):
         return self.generate_random_data(arg_names="point")
 
     def lift_belongs_to_total_space_test_data(self):
-        return self.generate_random_data(arg_names="point", space="base")
+        return self.generate_random_data(
+            arg_names="point",
+            data_space="base",
+        )
 
     def riemannian_submersion_after_lift_test_data(self):
-        return self.generate_random_data(arg_names="point", space="base")
+        return self.generate_random_data(
+            arg_names="point",
+            data_space="base",
+        )
 
     def log_after_align_is_horizontal_test_data(self):
         return self.generate_random_data(arg_names=("base_point", "point"))
@@ -25,9 +27,9 @@ class FiberBundleTestData(FiberBundleCaseData):
         )
 
     def lift_vec_test_data(self):
-        return self.generate_vectorization_base_space_data(
+        return self.generate_vectorization_data(
             arg_names=("point"),
-            space="base",
+            data_space="base",
         )
 
     def align_vec_test_data(self):
@@ -55,41 +57,15 @@ class FiberBundleTestData(FiberBundleCaseData):
             **datum,
         )
 
-        expected_nabla_x_a_y_e = LazyValue(
-            operator.itemgetter(0),
+        return self._vectorize_datum(
+            datum,
             expected,
-        )
-        expected_a_y_e = LazyValue(
-            operator.itemgetter(1),
-            expected,
-        )
-
-        n_reps = 2
-
-        vectorized_datum = {
-            name: LazyValue(
-                repeat_point,
-                value,
-                n_reps=n_reps,
-                expand=True,
-            )
-            for name, value in datum.items()
-        }
-
-        vectorized_datum.update(
-            expected_nabla_x_a_y_e=LazyValue(
-                repeat_point,
-                expected_nabla_x_a_y_e,
-                n_reps=n_reps,
-            ),
-            expected_a_y_e=LazyValue(
-                repeat_point,
-                expected_a_y_e,
-                n_reps=n_reps,
+            vectorization_type="basic",
+            expected_name=(
+                "expected_nabla_x_a_y_e",
+                "expected_a_y_e",
             ),
         )
-
-        return [vectorized_datum]
 
 
 class FiberBundleSubmersionLiftTestData(FiberBundleCaseData):
@@ -120,7 +96,7 @@ class FiberBundleSubmersionLiftTestData(FiberBundleCaseData):
     def tangent_riemannian_submersion_after_horizontal_lift_test_data(self):
         return self.generate_random_data(
             arg_names=("base_point", "tangent_vec"),
-            space="base",
+            data_space="base",
         )
 
     def tangent_riemannian_submersion_vec_test_data(self):
@@ -129,9 +105,9 @@ class FiberBundleSubmersionLiftTestData(FiberBundleCaseData):
         )
 
     def horizontal_lift_vec_test_data(self):
-        return self.generate_vectorization_base_space_data(
+        return self.generate_vectorization_data(
             arg_names=("base_point", "tangent_vec"),
-            space="base",
+            data_space="base",
         )
 
 
@@ -148,7 +124,7 @@ class FiberBundleProjectionTestData(FiberBundleCaseData):
     def horizontal_lift_is_horizontal_test_data(self):
         return self.generate_random_data(
             arg_names=("base_point", "tangent_vec"),
-            space="base",
+            data_space="base",
         )
 
     def horizontal_projection_vec_test_data(self):

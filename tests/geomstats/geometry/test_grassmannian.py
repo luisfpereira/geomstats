@@ -100,7 +100,9 @@ class TestGrassmannianCanonicalMetric(
     testing_data = RiemannianMetricTestData()
 
 
-class TestGrassmannianBundle(FiberBundleTestCase, metaclass=DataBasedParametrizer):
+class TestGrassmannianBundle(
+    FiberBundleTestCase, metaclass=GeometricDataBasedParametrizer
+):
     _n, _p = _get_random_params()
 
     total_space = Stiefel(_n, _p, equip=False)
@@ -112,12 +114,18 @@ class TestGrassmannianBundle(FiberBundleTestCase, metaclass=DataBasedParametrize
     base_space = Grassmannian(_n, _p, equip=False)
 
     testing_data = (
-        FiberBundleTestData()
+        FiberBundleTestData(
+            excluded_methods=(
+                "integrability_tensor",
+                "integrability_tensor_derivative",
+            )
+        )
         + FiberBundleSubmersionLiftTestData()
         + MarkedGeometricTestData(
             FiberBundleProjectionTestData(), marks=(pytest.mark.redundant,)
         )
     )
+
     testing_data.propagate("total_space", total_space)
     testing_data.propagate("base_space", base_space)
 
